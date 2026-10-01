@@ -1,4 +1,4 @@
-<?xml version="1.0-SNAPSHOT" encoding="UTF-8"?>
+<?xml version="1.0" encoding="UTF-8"?>
 <!-- 日志级别从低到高分为TRACE < DEBUG < INFO < WARN < ERROR < FATAL，如果设置为WARN，则低于WARN的信息都不会输出 -->
 <configuration scan="true" scanPeriod="10 seconds">
 
