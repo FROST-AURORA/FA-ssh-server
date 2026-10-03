@@ -16,9 +16,7 @@ import java.util.List;
 import java.util.stream.Collectors;
 
 /**
- *
- * @author xiaofuge bugstack.cn @小傅哥
- * 2026/1/20 08:23
+ * 智能体服务控制器
  */
 @Slf4j
 @RestController

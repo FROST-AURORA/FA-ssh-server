@@ -28,6 +28,9 @@ public class SshConnectionService implements ISshConnectionDomainService {
         this.sshSessionService = sshSessionService;
     }
 
+    /**
+     * 创建SSH连接
+     */
     @Override
     public void createConnection(SshConnectionEntity entity, SshConnectionConfigEntity configEntity) {
         // 1. 校验必填字段
@@ -63,6 +66,9 @@ public class SshConnectionService implements ISshConnectionDomainService {
         log.info("SSH连接创建成功 connectionId={}", entity.getConnectionId());
     }
 
+    /**
+     * 更新SSH连接
+     */
     @Override
     public void updateConnection(SshConnectionEntity entity, SshConnectionConfigEntity configEntity) {
         // 1. 校验必填字段
@@ -98,6 +104,9 @@ public class SshConnectionService implements ISshConnectionDomainService {
         log.info("SSH连接更新成功 connectionId={}", entity.getConnectionId());
     }
 
+    /**
+     * 删除SSH连接
+     */
     @Override
     public void deleteConnection(String connectionId) {
         if (connectionId == null || connectionId.isBlank()) {
@@ -107,11 +116,17 @@ public class SshConnectionService implements ISshConnectionDomainService {
         log.info("SSH连接删除成功 connectionId={}", connectionId);
     }
 
+    /**
+     * 查询单个连接
+     */
     @Override
     public SshConnectionEntity getConnection(String connectionId) {
         return repository.queryConnectionById(connectionId);
     }
 
+    /**
+     * 查询用户的所有连接
+     */
     @Override
     public List<SshConnectionEntity> getConnectionList(String userId) {
         if (userId == null || userId.isBlank()) {
@@ -120,11 +135,17 @@ public class SshConnectionService implements ISshConnectionDomainService {
         return repository.queryConnectionListByUserId(userId);
     }
 
+    /**
+     * 查询连接高级配置
+     */
     @Override
     public SshConnectionConfigEntity getConnectionConfig(String connectionId) {
         return repository.queryConnectionConfigById(connectionId);
     }
 
+    /**
+     * 建立SSH连接
+     */
     @Override
     public boolean connect(String connectionId) {
         // 1. 查询连接信息
@@ -150,6 +171,9 @@ public class SshConnectionService implements ISshConnectionDomainService {
         return success;
     }
 
+    /**
+     * 断开SSH连接
+     */
     @Override
     public void disconnect(String connectionId) {
         // 1. 断开 SSH 连接
@@ -163,6 +187,9 @@ public class SshConnectionService implements ISshConnectionDomainService {
         }
     }
 
+    /**
+     * 检查连接是否活跃
+     */
     @Override
     public boolean isConnected(String connectionId) {
         return sshSessionService.isConnected(connectionId);
