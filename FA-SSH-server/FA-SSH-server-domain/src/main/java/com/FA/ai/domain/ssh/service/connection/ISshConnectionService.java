@@ -1,4 +1,4 @@
-package com.FA.ai.domain.ssh.service;
+package com.FA.ai.domain.ssh.service.connection;
 
 import com.FA.ai.domain.ssh.model.entity.SshConnectionConfigEntity;
 import com.FA.ai.domain.ssh.model.entity.SshConnectionEntity;
@@ -7,10 +7,8 @@ import java.util.List;
 
 /**
  * SSH连接领域服务接口
- *
- * @author waissh dev
  */
-public interface ISshConnectionDomainService {
+public interface ISshConnectionService {
 
     /**
      * 创建SSH连接

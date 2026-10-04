@@ -5,6 +5,7 @@ import com.FA.ai.domain.ssh.adapter.repository.ISshConnectionRepository;
 import com.FA.ai.domain.ssh.model.entity.SshConnectionConfigEntity;
 import com.FA.ai.domain.ssh.model.entity.SshConnectionEntity;
 import com.FA.ai.domain.ssh.model.valobj.ConnectionStatusEnum;
+import com.FA.ai.domain.ssh.service.connection.ISshConnectionService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
@@ -18,7 +19,7 @@ import java.util.UUID;
  */
 @Slf4j
 @Service
-public class SshConnectionService implements ISshConnectionDomainService {
+public class SshConnectionService implements ISshConnectionService {
 
     private final ISshConnectionRepository repository;
     private final ISshSessionPort sshSessionService;

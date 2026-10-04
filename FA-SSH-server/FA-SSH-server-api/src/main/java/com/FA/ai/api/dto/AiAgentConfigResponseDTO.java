@@ -4,9 +4,6 @@ import lombok.Data;
 
 /**
  * 智能体配置响应对象
- *
- * @author xiaofuge bugstack.cn @小傅哥
- * 2026/1/20 08:18
  */
 @Data
 public class AiAgentConfigResponseDTO {
