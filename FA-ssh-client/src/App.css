@@ -321,6 +321,18 @@ kbd {
 .server-state.running {
   background: #73c991;
 }
+.server-state.error { background: #f48771; }
+.connection-error, .form-error { color: #f48771; overflow-wrap: anywhere; }
+.connection-error { padding: 12px; }
+.connection-error p { margin-bottom: 8px; }
+.connection-fields { border: 0; padding: 0; margin: 0; min-width: 0; }
+.connection-fields textarea { width: 100%; resize: vertical; }
+.connection-summary { padding: 40px 28px; max-width: 680px; margin: auto; overflow-wrap: anywhere; }
+.connection-summary > svg { color: var(--focus); margin-bottom: 18px; }
+.connection-summary dl { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 14px 20px; margin: 25px 0; }
+.connection-summary dt { color: var(--muted); }
+.connection-summary dd { margin: 0; }
+.connection-summary .muted { line-height: 1.8; }
 .server-details {
   display: flex;
   flex-direction: column;
@@ -579,6 +591,7 @@ kbd {
   font-size: 11px;
 }
 .session-view {
+  overflow: auto;
   display: none;
   flex: 1;
   min-height: 0;
@@ -989,6 +1002,7 @@ kbd {
   color: var(--muted);
   line-height: 1.8;
 }
+.delete-dialog .form-error { color: #f48771; }
 .hide-left {
   grid-template-columns: 48px 0 minmax(320px, 1fr) 350px;
 }

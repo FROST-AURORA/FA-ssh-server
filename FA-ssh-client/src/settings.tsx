@@ -121,7 +121,7 @@ export interface Settings {
   terminalFontSize: number;
 }
 export const defaultSettings: Settings = {
-  serverUrl: "http://127.0.0.1:8080",
+  serverUrl: import.meta.env.VITE_SSH_SERVER_URL || "http://localhost:8091",
   language: "zh-CN",
   theme: "dark",
   terminalFont: "Consolas",

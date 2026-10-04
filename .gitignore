@@ -1,1 +1,11 @@
 /FA-SSH-server/.idea/
+
+# Maven build output and runtime logs
+target/
+data/log/
+*.log
+
+# Local environment secrets
+.env
+.env.*
+!.env.example

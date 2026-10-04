@@ -1,6 +1,4 @@
 import {
-  lazy,
-  Suspense,
   useCallback,
   useEffect,
   useRef,
@@ -19,6 +17,7 @@ import {
   PanelRightClose,
   Pencil,
   Plus,
+  RefreshCw,
   Search,
   Server as ServerIcon,
   Settings2,
@@ -34,34 +33,32 @@ import { ChatPanel } from "./components/ChatPanel";
 import { ServerDialog } from "./components/ServerDialog";
 import { SettingsDialog } from "./components/SettingsDialog";
 import { useSettings } from "./settings";
-import {
-  exampleServers,
-  isServer,
-  readStored,
-  type Server,
-  type Session,
-  type SessionStatus,
-} from "./types";
+import { type Server, type Session, type SessionStatus } from "./types";
+import { useSshConnections } from "./hooks/useSshConnections";
+import { errorMessage } from "./api/ssh";
 import "./App.css";
 
-const SshTerminal = lazy(() => import("./components/SshTerminal"));
 const statusNames: Record<SessionStatus, string> = {
-  starting: "启动中",
-  running: "会话运行中",
-  closed: "已结束",
-  error: "启动失败",
+  starting: "连接中",
+  running: "已连接",
+  closed: "未连接",
+  error: "连接失败",
 };
 
-function App() {
-  const { t } = useSettings();
+function SshWorkspace() {
+  const { t, settings } = useSettings();
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [servers, setServers] = useState(() =>
-    readStored("fa-ssh.servers.v1", isServer, exampleServers),
-  );
+  const connections = useSshConnections(settings.serverUrl);
+  const { servers, loading, loadError, busy } = connections;
   const [search, setSearch] = useState("");
-  const [selected, setSelected] = useState(servers[0]?.id ?? "");
+  const [selected, setSelected] = useState("");
   const [editor, setEditor] = useState<Server | null | undefined>(undefined);
-  const [sessions, setSessions] = useState<Session[]>([]);
+  const [opened, setOpened] = useState<string[]>([]);
+  const sessions: Session[] = opened.flatMap((id) => {
+    const server = servers.find((s) => s.id === id);
+    return server ? [{ id, server, status: busy[id] === "连接中" || server.status === 2
+      ? "starting" : server.status === 1 ? "running" : server.status === 3 ? "error" : "closed" }] : [];
+  });
   const [activeId, setActiveId] = useState("");
   const [notice, setNotice] = useState("");
   const [leftVisible, setLeftVisible] = useState(true);
@@ -69,6 +66,7 @@ function App() {
   const [mobilePanel, setMobilePanel] = useState("terminal");
   const [collapsed, setCollapsed] = useState<string[]>([]);
   const [deleting, setDeleting] = useState<Server | null>(null);
+  const [deleteError, setDeleteError] = useState("");
   const deleteRef = useRef<HTMLDialogElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const activeSession = sessions.find((s) => s.id === activeId);
@@ -77,12 +75,9 @@ function App() {
     [],
   );
   useEffect(() => {
-    try {
-      localStorage.setItem("fa-ssh.servers.v1", JSON.stringify(servers));
-    } catch {
-      storageError();
-    }
-  }, [servers, storageError]);
+    if (!servers.some((s) => s.id === selected)) setSelected(servers[0]?.id ?? "");
+    if (activeId && !servers.some((s) => s.id === activeId)) setActiveId("");
+  }, [servers, selected, activeId]);
   useEffect(() => {
     if (deleting) deleteRef.current?.showModal();
   }, [deleting]);
@@ -103,11 +98,7 @@ function App() {
       if (e.key === "`") {
         e.preventDefault();
         setMobilePanel("terminal");
-        document
-          .querySelector<HTMLTextAreaElement>(
-            ".session-view.active .xterm-helper-textarea",
-          )
-          ?.focus();
+        document.querySelector<HTMLButtonElement>(".session-view.active .primary")?.focus();
       }
       if (e.key === ",") {
         e.preventDefault();
@@ -117,45 +108,40 @@ function App() {
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, []);
-  const updateStatus = useCallback(
-    (id: string, status: SessionStatus) =>
-      setSessions((all) =>
-        all.map((s) => (s.id === id ? { ...s, status } : s)),
-      ),
-    [],
-  );
-  function connect(server: Server) {
-    if (server.example) {
-      setNotice("这是示例配置。请先编辑为你的真实服务器地址，再连接。");
-      setEditor(server);
-      return;
-    }
-    if (!isTauri()) {
-      setNotice(
-        "SSH 终端需要桌面环境。请运行 .\\npm22.cmd run tauri dev 后连接；浏览器中可管理配置和使用本地助手。",
-      );
-      return;
-    }
-    const running = sessions.find(
-      (s) =>
-        s.server.id === server.id && ["starting", "running"].includes(s.status),
-    );
-    if (running) setActiveId(running.id);
-    else {
-      const session: Session = {
-        id: crypto.randomUUID(),
-        server: { ...server },
-        status: "starting",
-      };
-      setSessions((all) => [...all, session]);
-      setActiveId(session.id);
-    }
+  async function connect(server: Server) {
+    if (busy[server.id]) return;
+    setOpened((all) => all.includes(server.id) ? all : [...all, server.id]);
+    setActiveId(server.id);
     setMobilePanel("terminal");
+    if (server.status === 1) return;
+    try {
+      await connections.connect(server.id);
+      setNotice("SSH 连接成功");
+    } catch (error) { setNotice(errorMessage(error)); }
   }
-  function closeSession(id: string) {
-    setSessions((all) => all.filter((s) => s.id !== id));
-    if (id === activeId)
-      setActiveId(sessions.find((s) => s.id !== id)?.id ?? "");
+  async function disconnect(id: string, close = false) {
+    try {
+      await connections.disconnect(id);
+      if (close) {
+        setOpened((all) => all.filter((s) => s !== id));
+        setActiveId((current) => current === id ? sessions.find((s) => s.id !== id)?.id ?? "" : current);
+      }
+      setNotice("已断开连接");
+    } catch (error) { setNotice(errorMessage(error)); }
+  }
+  async function edit(server: Server) {
+    try { setEditor(await connections.get(server.id)); }
+    catch (error) { setNotice(errorMessage(error)); }
+  }
+  async function deleteConnection() {
+    if (!deleting) return;
+    setDeleteError("");
+    try {
+      await connections.remove(deleting.id);
+      setOpened((all) => all.filter((id) => id !== deleting.id));
+      setDeleting(null);
+      setNotice("连接已删除");
+    } catch (error) { setDeleteError(errorMessage(error)); }
   }
   const filtered = servers.filter((s) =>
     `${s.name} ${s.host} ${s.username} ${s.group}`
@@ -245,7 +231,7 @@ function App() {
           title={t("使用帮助")}
           onClick={() =>
             setNotice(
-              "添加连接后，双击服务器或点击连接按钮打开终端。认证由系统 OpenSSH 处理。Ctrl+K 搜索，Ctrl+N 新建连接。AI 区域当前为本地规则助手。配置与对话保存在当前设备。",
+              "添加连接后，双击服务器或点击连接按钮建立服务端 SSH 会话。关闭会话会调用服务端断开接口。Ctrl+K 搜索，Ctrl+N 新建连接。连接配置保存在服务端，AI 区域当前为本地规则助手。",
             )
           }
         >
@@ -264,6 +250,10 @@ function App() {
       <aside className="server-panel" aria-label={t("SSH 连接管理面板")}>
         <header className="panel-heading">
           <span>{t("SSH 连接")}</span>
+          <button className="icon-button" title={t("刷新连接列表")} aria-label={t("刷新连接列表")}
+            disabled={loading || Object.keys(busy).length > 0} onClick={() => void connections.refresh()}>
+            <RefreshCw size={15} />
+          </button>
           <button
             className="icon-button"
             title={t("添加服务器")}
@@ -293,6 +283,11 @@ function App() {
           )}
         </div>
         <div className="server-list">
+          {loadError && <div className="connection-error" role="alert">
+            <p>{loadError}</p><p>{t("列表状态可能已过期")}</p>
+            <button className="text-button" disabled={loading} onClick={() => void connections.refresh()}>{t("重试")}</button>
+          </div>}
+          {loading && !servers.length && <p className="loading" role="status">{t("正在加载连接…")}</p>}
           {groups.map((group) => (
             <section key={group}>
               <button
@@ -334,13 +329,13 @@ function App() {
                         <span className="server-icon">
                           <SquareTerminal size={23} />
                           <span
-                            className={`server-state ${sessions.some((t) => t.server.id === s.id && t.status === "running") ? "running" : ""}`}
+                            className={`server-state ${s.status === 1 ? "running" : s.status === 3 ? "error" : ""}`}
                           />
                         </span>
                         <span className="server-details">
                           <span className="server-name">
                             {s.name}
-                            {s.example && <small>{t("示例")}</small>}
+                            <small>{t(busy[s.id] || statusNames[s.status === 1 ? "running" : s.status === 2 ? "starting" : s.status === 3 ? "error" : "closed"])}</small>
                           </span>
                           <span className="server-address">
                             {s.username}@{s.host}:{s.port}
@@ -352,7 +347,8 @@ function App() {
                           className="icon-button"
                           aria-label={`${t("编辑")} ${s.name}`}
                           title={t("编辑连接")}
-                          onClick={() => setEditor(s)}
+                          disabled={!!busy[s.id]}
+                          onClick={() => void edit(s)}
                         >
                           <Pencil size={13} />
                         </button>
@@ -360,7 +356,8 @@ function App() {
                           className="icon-button danger-hover"
                           aria-label={`${t("删除")} ${s.name}`}
                           title={t("删除连接")}
-                          onClick={() => setDeleting(s)}
+                          disabled={!!busy[s.id]}
+                          onClick={() => { setDeleteError(""); setDeleting(s); }}
                         >
                           <Trash2 size={13} />
                         </button>
@@ -368,10 +365,11 @@ function App() {
                       {selected === s.id && (
                         <button
                           className="connect-button"
-                          onClick={() => connect(s)}
+                          disabled={!!busy[s.id] || s.status === 2}
+                          onClick={() => s.status === 1 ? void disconnect(s.id) : void connect(s)}
                         >
                           <Unplug size={12} />
-                          {t("连接")}
+                          {t(busy[s.id] || (s.status === 1 ? "断开连接" : "连接"))}
                           <ChevronRight size={12} />
                         </button>
                       )}
@@ -379,7 +377,7 @@ function App() {
                   ))}
             </section>
           ))}
-          {!filtered.length && (
+          {!filtered.length && !loading && !loadError && (
             <div className="list-empty">
               <FolderOpen size={28} />
               <p>{search ? t("未找到匹配的服务器") : t("还没有服务器")}</p>
@@ -394,7 +392,7 @@ function App() {
         </div>
         <div className="sidebar-footer">
           <span>
-            {servers.length} {t("台服务器 · 保存在本机")}
+            {servers.length} {t("台服务器 · 保存在服务端")}
           </span>
           <button className="primary" onClick={() => setEditor(null)}>
             <Plus size={16} />
@@ -430,7 +428,8 @@ function App() {
               <button
                 className="icon-button"
                 aria-label={`${t("关闭")} ${s.server.name} ${t("终端")}`}
-                onClick={() => closeSession(s.id)}
+                disabled={!!busy[s.id]}
+                onClick={() => void disconnect(s.id, true)}
               >
                 <X size={13} />
               </button>
@@ -465,7 +464,8 @@ function App() {
                   className="icon-button"
                   title={t("结束并关闭会话")}
                   aria-label={t("结束并关闭会话")}
-                  onClick={() => closeSession(activeId)}
+                  disabled={!!busy[activeId]}
+                  onClick={() => void disconnect(activeId, true)}
                 >
                   <Unplug size={15} />
                 </button>
@@ -484,7 +484,7 @@ function App() {
                 size={94}
               />
               <h1>{t("连接你的下一台服务器")}</h1>
-              <p>{t("从左侧选择服务器，开启终端会话")}</p>
+              <p>{t("从左侧选择服务器，建立 SSH 连接")}</p>
               <button className="primary" onClick={() => setEditor(null)}>
                 <Plus size={16} />
                 {t("新建连接")}
@@ -515,7 +515,7 @@ function App() {
             </div>
             <div className="welcome-footer">
               <ShieldCheck size={13} />
-              {t("OpenSSH 加密连接")}
+              {t("服务端 SSH 连接管理")}
               <span>·</span>
               {t("你的工作区，你的掌控")}
             </div>
@@ -526,15 +526,22 @@ function App() {
             key={session.id}
             className={`session-view ${activeId === session.id ? "active" : ""}`}
           >
-            <Suspense
-              fallback={<p className="loading">{t("正在加载终端…")}</p>}
-            >
-              <SshTerminal
-                session={session}
-                active={activeId === session.id}
-                onStatus={updateStatus}
-              />
-            </Suspense>
+            <div className="connection-summary">
+              <ServerIcon size={40} />
+              <h2>{session.server.name}</h2>
+              <p className={`session-status ${session.status}`} role="status">{t(busy[session.id] || statusNames[session.status])}</p>
+              <dl>
+                <dt>{t("主机地址")}</dt><dd>{session.server.host}:{session.server.port}</dd>
+                <dt>{t("用户名")}</dt><dd>{session.server.username}</dd>
+                <dt>{t("认证方式")}</dt><dd>{t(session.server.auth === "key" ? "私钥认证" : "密码认证")}</dd>
+                <dt>{t("连接 ID")}</dt><dd>{session.server.id}</dd>
+              </dl>
+              <p className="muted">{t("当前接口支持 SSH 连接管理，暂未提供交互式终端输入输出。")}</p>
+              <button className="primary" disabled={!!busy[session.id] || session.server.status === 2}
+                onClick={() => session.server.status === 1 ? void disconnect(session.id) : void connect(session.server)}>
+                <Unplug size={15} />{t(session.server.status === 1 ? "断开连接" : "连接")}
+              </button>
+            </div>
           </div>
         ))}
       </section>
@@ -545,8 +552,8 @@ function App() {
         </span>
         <span>
           <Unplug size={12} />
-          {sessions.filter((s) => s.status === "running").length
-            ? `${sessions.filter((s) => s.status === "running").length} ${t("个会话运行中")}`
+          {servers.filter((s) => s.status === 1).length
+            ? `${servers.filter((s) => s.status === 1).length} ${t("个会话运行中")}`
             : t("无活动会话")}
         </span>
         <span className="status-environment">
@@ -580,16 +587,13 @@ function App() {
         <ServerDialog
           server={editor}
           onClose={() => setEditor(undefined)}
-          onSave={(server) => {
-            setServers((all) =>
-              all.some((s) => s.id === server.id)
-                ? all.map((s) => (s.id === server.id ? server : s))
-                : [...all, server],
-            );
+          onSave={async (input) => {
+            const server = await connections.save(input);
             setSelected(server.id);
             setEditor(undefined);
             setSearch("");
             setCollapsed((all) => all.filter((g) => g !== server.group));
+            setNotice("连接已保存");
           }}
         />
       )}
@@ -598,29 +602,23 @@ function App() {
           ref={deleteRef}
           className="dialog delete-dialog"
           aria-labelledby="delete-title"
-          onCancel={() => setDeleting(null)}
+          onCancel={(e) => { if (busy[deleting.id]) e.preventDefault(); else setDeleting(null); }}
         >
           <h2 id="delete-title">
             {t("删除连接")} “{deleting.name}”?
           </h2>
-          <p>{t("将删除本机保存的连接配置，并关闭该服务器的终端会话。")}</p>
+          <p>{t("将先断开 SSH 会话，再删除服务端保存的连接配置。")}</p>
+          {deleteError && <p className="form-error" role="alert">{deleteError}</p>}
           <div className="dialog-actions">
-            <button className="secondary" onClick={() => setDeleting(null)}>
+            <button className="secondary" disabled={!!busy[deleting.id]} onClick={() => setDeleting(null)}>
               {t("取消")}
             </button>
             <button
               className="danger"
-              onClick={() => {
-                const target = deleting.id;
-                setServers((all) => all.filter((s) => s.id !== target));
-                setSessions((all) => all.filter((s) => s.server.id !== target));
-                if (activeSession?.server.id === target) setActiveId("");
-                if (selected === target)
-                  setSelected(servers.find((s) => s.id !== target)?.id ?? "");
-                setDeleting(null);
-              }}
+              disabled={!!busy[deleting.id]}
+              onClick={() => void deleteConnection()}
             >
-              {t("删除连接")}
+              {t(busy[deleting.id] || "删除连接")}
             </button>
           </div>
         </dialog>
@@ -628,4 +626,8 @@ function App() {
     </main>
   );
 }
-export default App;
+export default function App() {
+  const { settings } = useSettings();
+  // A different service has a different set of connection IDs and live sessions.
+  return <SshWorkspace key={settings.serverUrl} />;
+}

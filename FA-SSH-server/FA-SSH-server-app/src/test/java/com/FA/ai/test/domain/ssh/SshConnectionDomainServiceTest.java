@@ -65,9 +65,9 @@ public class SshConnectionDomainServiceTest {
         SshConnectionEntity result = sshConnectionDomainService.getConnection(entity.getConnectionId());
         Assert.assertNotNull("查询结果不应为空", result);
         Assert.assertEquals("连接名称应匹配", "测试连接-密码认证", result.getConnectionName());
-        Assert.assertEquals("主机地址应匹配", "192.168.1.100", result.getHost());
+        Assert.assertEquals("主机地址应匹配", "124.221.171.105", result.getHost());
         Assert.assertEquals("端口应匹配", Integer.valueOf(22), result.getPort());
-        Assert.assertEquals("用户名应匹配", "xiaofuge", result.getUsername());
+        Assert.assertEquals("用户名应匹配", "ubuntu", result.getUsername());
         Assert.assertEquals("认证类型应匹配", AuthTypeEnum.PASSWORD, result.getAuthType());
 
         // 验证高级配置
@@ -407,11 +407,11 @@ public class SshConnectionDomainServiceTest {
         // 先创建连接
         SshConnectionEntity entity = SshConnectionEntity.builder()
                 .connectionName("测试连接-连接测试")
-                .host("140.143.183.225")
+                .host("124.221.171.105")
                 .port(22)
                 .username("ubuntu")
                 .authType(AuthTypeEnum.PASSWORD)
-                .password("testPassword")
+                .password("05Zyxyyds")
                 .userId("test-user")
                 .build();
         sshConnectionDomainService.createConnection(entity, null);

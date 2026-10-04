@@ -2,7 +2,6 @@ package com.FA.ai.config;
 
 import com.FA.ai.domain.agent.model.valobj.properties.AiAgentAutoConfigProperties;
 import com.FA.ai.domain.agent.service.IArmoryService;
-import com.alibaba.fastjson.JSON;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
@@ -26,7 +25,7 @@ public class AiAgentAutoConfig implements ApplicationListener<ApplicationReadyEv
     @Override
     public void onApplicationEvent(ApplicationReadyEvent event) {
         try {
-            log.info("Ai Agent 智能体装配 {}", JSON.toJSONString(aiAgentAutoConfigProperties.getTables().values()));
+            log.info("Ai Agent 智能体装配，配置数量 {}", aiAgentAutoConfigProperties.getTables().size());
 
             armoryService.acceptArmoryAgents(new ArrayList<>(aiAgentAutoConfigProperties.getTables().values()));
         } catch (Exception e) {

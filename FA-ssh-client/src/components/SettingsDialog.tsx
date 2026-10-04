@@ -164,7 +164,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
                     id="service-url"
                     type="url"
                     value={draft.serverUrl}
-                    placeholder="http://127.0.0.1:8080"
+                    placeholder="http://localhost:8091"
                     spellCheck={false}
                     aria-describedby="service-url-description"
                     onChange={(e) => {
@@ -174,7 +174,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
                   />
                   <p id="service-url-description">
                     {t(
-                      "应用服务的基础地址。当前版本仅保存配置，尚未接入服务接口。",
+                      "SSH 管理服务地址，不含 /api/v1/ssh。保存后立即加载该服务的连接列表；切换服务不会断开原服务的会话。",
                     )}
                   </p>
                 </div>

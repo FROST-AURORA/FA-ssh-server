@@ -8,6 +8,21 @@ export interface Server {
   privateKey: string;
   group: string;
   example?: boolean;
+  status?: 0 | 1 | 2 | 3;
+  userId?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+export interface ServerInput {
+  id?: string;
+  name: string;
+  host: string;
+  port: number;
+  username: string;
+  auth: "password" | "key";
+  password?: string;
+  privateKey?: string;
+  userId?: string;
 }
 export type SessionStatus = "starting" | "running" | "closed" | "error";
 export interface Session {
