@@ -92,14 +92,13 @@ public class SshTerminalService implements ISshTerminalService {
             throw new IllegalArgumentException("终端会话不存在或已关闭");
         }
 
-        // 2. 写入命令
-        terminalSessionService.write(sessionId, command);
+        // 2. 使用 executeCommandAndWait 等待命令执行完成
+        //    超时时间 30 秒（大部分命令应该能在 30 秒内完成）
+        String output = terminalSessionService.executeCommandAndWait(sessionId, command, 30000);
 
         // 3. 更新活跃时间
         entity.touch();
 
-        // 4. 读取输出
-        String output = terminalSessionService.read(sessionId);
         log.debug("命令执行完成 sessionId={} outputLength={}", sessionId, output.length());
 
         return output;
