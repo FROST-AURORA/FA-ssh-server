@@ -1,4 +1,11 @@
 export const english: Record<string, string> = {
+  "SSH 服务地址，不含 /api/v1/ssh。切换服务时会尝试释放当前终端；如需断开 SSH 连接，请先点击断开。": "SSH service URL, without /api/v1/ssh. Switching services attempts to release current terminals. Click Disconnect first to also close the SSH connection.",
+  重新连接: "Reconnect",
+  执行单条命令: "Run a command",
+  "输入命令，Enter 执行": "Enter a command, press Enter to run",
+  执行命令: "Run command",
+  "执行中…": "Running…",
+  "添加连接后，双击服务器或点击连接打开远程终端。支持直接输入、粘贴及单条命令执行。关闭标签会释放终端并断开 SSH。Ctrl+K 搜索，Ctrl+N 新建连接。AI 区域当前为本地规则助手。": "Add a connection and double-click a server or click Connect to open its terminal. Type, paste, or run a command. Closing a tab releases the terminal and disconnects SSH. Ctrl+K searches; Ctrl+N adds a connection. The assistant uses local rules.",
   连接中: "Connecting",
   已连接: "Connected",
   未连接: "Disconnected",

@@ -15,12 +15,15 @@ interface ConnectionDTO {
   updatedAt?: string;
 }
 
-async function request<T>(apiBaseUrl: string, path: string, method = "GET", body?: unknown): Promise<T> {
+export async function request<T>(apiBaseUrl: string, path: string, method = "GET", body?: unknown, options: { signal?: AbortSignal; keepalive?: boolean } = {}): Promise<T> {
   const controller = new AbortController();
+  const abort = () => controller.abort();
+  options.signal?.addEventListener("abort", abort, { once: true });
+  if (options.signal?.aborted) controller.abort();
   const timer = window.setTimeout(() => controller.abort(), 45_000);
   try {
     const response = await fetch(`${apiBaseUrl}/${path}`, {
-      method, signal: controller.signal, cache: "no-store",
+      method, signal: controller.signal, cache: "no-store", keepalive: options.keepalive,
       ...(body === undefined ? {} : {
         headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
       }),
@@ -31,12 +34,14 @@ async function request<T>(apiBaseUrl: string, path: string, method = "GET", body
     if (result.code !== "0000") throw new Error(result.info || "SSH 操作失败");
     return result.data as T;
   } catch (error) {
-    if (controller.signal.aborted) throw new Error("SSH 服务请求超时，请刷新列表确认操作结果。");
+    if (options.signal?.aborted) throw error;
+    if (controller.signal.aborted) throw new Error("SSH 服务请求超时，请确认连接状态后重试。");
     if (error instanceof TypeError) throw new Error("无法访问 SSH 服务，请检查服务地址和网络后重试。");
     if (error instanceof SyntaxError) throw new Error("SSH 服务响应不是有效的 JSON，请检查服务端地址。");
     throw error;
   } finally {
     window.clearTimeout(timer);
+    options.signal?.removeEventListener("abort", abort);
   }
 }
 

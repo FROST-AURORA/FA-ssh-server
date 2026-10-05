@@ -174,7 +174,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
                   />
                   <p id="service-url-description">
                     {t(
-                      "SSH 管理服务地址，不含 /api/v1/ssh。保存后立即加载该服务的连接列表；切换服务不会断开原服务的会话。",
+                      "SSH 服务地址，不含 /api/v1/ssh。切换服务时会尝试释放当前终端；如需断开 SSH 连接，请先点击断开。",
                     )}
                   </p>
                 </div>

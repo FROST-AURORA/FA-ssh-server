@@ -30,6 +30,8 @@ import {
   X,
 } from "lucide-react";
 import { ChatPanel } from "./components/ChatPanel";
+import SshTerminal from "./components/SshTerminal";
+import type { TerminalSession } from "./api/terminalSession";
 import { ServerDialog } from "./components/ServerDialog";
 import { SettingsDialog } from "./components/SettingsDialog";
 import { useSettings } from "./settings";
@@ -49,16 +51,23 @@ function SshWorkspace() {
   const { t, settings } = useSettings();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const connections = useSshConnections(settings.serverUrl);
-  const { servers, loading, loadError, busy } = connections;
+  const { servers, loading, loadError } = connections;
+  const [terminalBusy, setTerminalBusy] = useState<Record<string, string>>({});
+  const busy = { ...connections.busy, ...terminalBusy };
+  const terminalLocks = useRef(new Set<string>());
+  const controllers = useRef(new Map<string, TerminalSession>());
+  const mounted = useRef(true);
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState("");
   const [editor, setEditor] = useState<Server | null | undefined>(undefined);
-  const [opened, setOpened] = useState<string[]>([]);
-  const sessions: Session[] = opened.flatMap((id) => {
-    const server = servers.find((s) => s.id === id);
-    return server ? [{ id, server, status: busy[id] === "连接中" || server.status === 2
-      ? "starting" : server.status === 1 ? "running" : server.status === 3 ? "error" : "closed" }] : [];
-  });
+  const [sessions, setSessions] = useState<(Session & { generation: string })[]>([]);
+  const registerController = useCallback((id: string, controller: TerminalSession | null) => {
+    if (controller) controllers.current.set(id, controller);
+    else controllers.current.delete(id);
+  }, []);
+  const onTerminalStatus = useCallback((id: string, status: SessionStatus) => {
+    setSessions((all) => all.map((session) => session.id === id ? { ...session, status } : session));
+  }, []);
   const [activeId, setActiveId] = useState("");
   const [notice, setNotice] = useState("");
   const [leftVisible, setLeftVisible] = useState(true);
@@ -75,9 +84,17 @@ function SshWorkspace() {
     [],
   );
   useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
+  useEffect(() => {
     if (!servers.some((s) => s.id === selected)) setSelected(servers[0]?.id ?? "");
-    if (activeId && !servers.some((s) => s.id === activeId)) setActiveId("");
-  }, [servers, selected, activeId]);
+  }, [servers, selected]);
+  useEffect(() => {
+    if (activeId && !sessions.some((session) => session.id === activeId)) {
+      setActiveId(sessions[0]?.id ?? "");
+    }
+  }, [sessions, activeId]);
   useEffect(() => {
     if (deleting) deleteRef.current?.showModal();
   }, [deleting]);
@@ -98,7 +115,7 @@ function SshWorkspace() {
       if (e.key === "`") {
         e.preventDefault();
         setMobilePanel("terminal");
-        document.querySelector<HTMLButtonElement>(".session-view.active .primary")?.focus();
+        requestAnimationFrame(() => document.querySelector<HTMLTextAreaElement>(".session-view.active .xterm-helper-textarea")?.focus());
       }
       if (e.key === ",") {
         e.preventDefault();
@@ -108,24 +125,59 @@ function SshWorkspace() {
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, []);
+  async function withTerminalLock<T>(id: string, label: string, action: () => Promise<T>) {
+    if (terminalLocks.current.has(id)) throw new Error("该连接正在操作中，请稍候。");
+    terminalLocks.current.add(id);
+    setTerminalBusy((all) => ({ ...all, [id]: label }));
+    try { return await action(); }
+    finally {
+      terminalLocks.current.delete(id);
+      if (mounted.current) setTerminalBusy((all) => {
+        const next = { ...all };
+        delete next[id];
+        return next;
+      });
+    }
+  }
+  async function closeTerminal(id: string) {
+    try {
+      await controllers.current.get(id)?.close();
+      if (mounted.current) onTerminalStatus(id, "closed");
+    } catch (error) {
+      if (mounted.current) onTerminalStatus(id, "error");
+      throw error;
+    }
+  }
   async function connect(server: Server) {
     if (busy[server.id]) return;
-    setOpened((all) => all.includes(server.id) ? all : [...all, server.id]);
-    setActiveId(server.id);
     setMobilePanel("terminal");
-    if (server.status === 1) return;
+    const existing = sessions.find((session) => session.id === server.id);
+    if (existing?.status === "running" || existing?.status === "starting") {
+      setActiveId(server.id);
+      return;
+    }
     try {
-      await connections.connect(server.id);
-      setNotice("SSH 连接成功");
+      await withTerminalLock(server.id, "连接中", async () => {
+        await closeTerminal(server.id);
+        if (server.status !== 1 || existing) await connections.connect(server.id);
+        if (!mounted.current) return;
+        setSessions((all) => [...all.filter((session) => session.id !== server.id), {
+          id: server.id, server, status: "starting", generation: crypto.randomUUID(),
+        }]);
+        setActiveId(server.id);
+      });
     } catch (error) { setNotice(errorMessage(error)); }
   }
   async function disconnect(id: string, close = false) {
     try {
-      await connections.disconnect(id);
-      if (close) {
-        setOpened((all) => all.filter((s) => s !== id));
-        setActiveId((current) => current === id ? sessions.find((s) => s.id !== id)?.id ?? "" : current);
-      }
+      await withTerminalLock(id, "断开中", async () => {
+        await closeTerminal(id);
+        await connections.disconnect(id);
+        if (close) {
+          setSessions((all) => all.filter((s) => s.id !== id));
+          setActiveId((current) => current === id ? sessions.find((s) => s.id !== id)?.id ?? "" : current);
+        }
+      });
       setNotice("已断开连接");
     } catch (error) { setNotice(errorMessage(error)); }
   }
@@ -137,8 +189,12 @@ function SshWorkspace() {
     if (!deleting) return;
     setDeleteError("");
     try {
-      await connections.remove(deleting.id);
-      setOpened((all) => all.filter((id) => id !== deleting.id));
+      await withTerminalLock(deleting.id, "删除中", async () => {
+        await closeTerminal(deleting.id);
+        await connections.remove(deleting.id);
+        setSessions((all) => all.filter((session) => session.id !== deleting.id));
+        setActiveId((current) => current === deleting.id ? "" : current);
+      });
       setDeleting(null);
       setNotice("连接已删除");
     } catch (error) { setDeleteError(errorMessage(error)); }
@@ -231,7 +287,7 @@ function SshWorkspace() {
           title={t("使用帮助")}
           onClick={() =>
             setNotice(
-              "添加连接后，双击服务器或点击连接按钮建立服务端 SSH 会话。关闭会话会调用服务端断开接口。Ctrl+K 搜索，Ctrl+N 新建连接。连接配置保存在服务端，AI 区域当前为本地规则助手。",
+              "添加连接后，双击服务器或点击连接打开远程终端。支持直接输入、粘贴及单条命令执行。关闭标签会释放终端并断开 SSH。Ctrl+K 搜索，Ctrl+N 新建连接。AI 区域当前为本地规则助手。",
             )
           }
         >
@@ -460,6 +516,11 @@ function SshWorkspace() {
                 <span className={`session-status ${activeSession.status}`}>
                   {t(statusNames[activeSession.status])}
                 </span>
+                {(activeSession.status === "closed" || activeSession.status === "error") && (
+                  <button className="text-button" disabled={!!busy[activeId]} onClick={() => void connect(servers.find((s) => s.id === activeId) ?? activeSession.server)}>
+                    {t("重新连接")}
+                  </button>
+                )}
                 <button
                   className="icon-button"
                   title={t("结束并关闭会话")}
@@ -523,25 +584,11 @@ function SshWorkspace() {
         )}
         {sessions.map((session) => (
           <div
-            key={session.id}
+            key={session.generation}
             className={`session-view ${activeId === session.id ? "active" : ""}`}
           >
-            <div className="connection-summary">
-              <ServerIcon size={40} />
-              <h2>{session.server.name}</h2>
-              <p className={`session-status ${session.status}`} role="status">{t(busy[session.id] || statusNames[session.status])}</p>
-              <dl>
-                <dt>{t("主机地址")}</dt><dd>{session.server.host}:{session.server.port}</dd>
-                <dt>{t("用户名")}</dt><dd>{session.server.username}</dd>
-                <dt>{t("认证方式")}</dt><dd>{t(session.server.auth === "key" ? "私钥认证" : "密码认证")}</dd>
-                <dt>{t("连接 ID")}</dt><dd>{session.server.id}</dd>
-              </dl>
-              <p className="muted">{t("当前接口支持 SSH 连接管理，暂未提供交互式终端输入输出。")}</p>
-              <button className="primary" disabled={!!busy[session.id] || session.server.status === 2}
-                onClick={() => session.server.status === 1 ? void disconnect(session.id) : void connect(session.server)}>
-                <Unplug size={15} />{t(session.server.status === 1 ? "断开连接" : "连接")}
-              </button>
-            </div>
+            <SshTerminal session={session} active={activeId === session.id}
+              onStatus={onTerminalStatus} onController={registerController} />
           </div>
         ))}
       </section>
@@ -552,8 +599,8 @@ function SshWorkspace() {
         </span>
         <span>
           <Unplug size={12} />
-          {servers.filter((s) => s.status === 1).length
-            ? `${servers.filter((s) => s.status === 1).length} ${t("个会话运行中")}`
+          {sessions.filter((s) => s.status === "running").length
+            ? `${sessions.filter((s) => s.status === "running").length} ${t("个会话运行中")}`
             : t("无活动会话")}
         </span>
         <span className="status-environment">
@@ -588,7 +635,10 @@ function SshWorkspace() {
           server={editor}
           onClose={() => setEditor(undefined)}
           onSave={async (input) => {
-            const server = await connections.save(input);
+            const server = await withTerminalLock(input.id || "new", "保存中", async () => {
+              if (input.id) await closeTerminal(input.id);
+              return connections.save(input);
+            });
             setSelected(server.id);
             setEditor(undefined);
             setSearch("");
