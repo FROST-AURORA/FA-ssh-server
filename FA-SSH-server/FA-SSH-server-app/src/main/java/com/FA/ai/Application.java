@@ -16,9 +16,10 @@ public class Application {
         SpringApplication.run(Application.class);
     }
 
+    /** 测试工具：大小写转换 */
     @Bean("myToolCallbackProvider")
-    public ToolCallbackProvider testTools(MyTestMcpService testService) {
-        return MethodToolCallbackProvider.builder().toolObjects(testService).build();
+    public ToolCallbackProvider testTools(MyTestMcpService toolService) {
+        return MethodToolCallbackProvider.builder().toolObjects(toolService).build();
     }
 
 }

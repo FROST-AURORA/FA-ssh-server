@@ -140,6 +140,10 @@
         </dependency>
         <dependency>
             <groupId>com.FA.ai</groupId>
+            <artifactId>FA-SSH-server-case</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.FA.ai</groupId>
             <artifactId>FA-SSH-server-infrastructure</artifactId>
         </dependency>
         <dependency>
