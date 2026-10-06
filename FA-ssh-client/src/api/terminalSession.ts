@@ -11,6 +11,8 @@ export class TerminalSession {
   private stopped = false;
   private failed = false;
   private executing = false;
+  private agentRunning = false;
+  private agentAbort?: () => void;
   private opening: Promise<void> = Promise.resolve();
   private closing: Promise<void> | null = null;
   private reading: Promise<void> = Promise.resolve();
@@ -53,6 +55,7 @@ export class TerminalSession {
   private fail(operation: string, error: unknown) {
     if (this.stopped || this.failed) return;
     this.failed = true;
+    this.agentAbort?.();
     this.clearTimers();
     this.readAbort.abort();
     this.pendingInput = "";
@@ -67,6 +70,7 @@ export class TerminalSession {
       if (output) this.output(output);
       if (output === disconnectedOutput) {
         this.failed = true;
+        this.agentAbort?.();
         this.status("closed");
         return;
       }
@@ -75,7 +79,7 @@ export class TerminalSession {
   }
 
   write(input: string) {
-    if (this.stopped || this.failed || this.executing) return;
+    if (this.stopped || this.failed || this.executing || this.agentRunning) return;
     this.pendingInput += input;
     if (this.inputTimer === undefined) {
       this.inputTimer = window.setTimeout(() => this.flushInput(), 16);
@@ -106,7 +110,7 @@ export class TerminalSession {
   }
 
   exec(command: string) {
-    if (this.stopped || this.failed || this.executing || !this.sessionId) {
+    if (this.stopped || this.failed || this.executing || this.agentRunning || !this.sessionId) {
       return Promise.reject(new Error("终端尚未就绪，请连接后重试。"));
     }
     this.executing = true;
@@ -129,6 +133,27 @@ export class TerminalSession {
     return this.execution;
   }
 
+  async beginAgentRun(abort: () => void) {
+    if (this.stopped || this.failed || this.executing || this.agentRunning || !this.sessionId) {
+      throw new Error("终端尚未就绪或正在执行命令，请稍后重试。");
+    }
+    this.agentRunning = true;
+    this.agentAbort = abort;
+    this.flushInput();
+    await this.writing;
+    if (this.stopped || this.failed) {
+      this.endAgentRun();
+      throw new Error("SSH 终端已断开，请重新连接。");
+    }
+    // Keep polling: the backend duplicates AI command output into the UI buffer.
+    return this.sessionId;
+  }
+
+  endAgentRun() {
+    this.agentRunning = false;
+    this.agentAbort = undefined;
+  }
+
   private clearTimers() {
     window.clearTimeout(this.pollTimer);
     window.clearTimeout(this.inputTimer);
@@ -138,6 +163,7 @@ export class TerminalSession {
   close() {
     if (this.closing) return this.closing;
     this.stopped = true;
+    this.agentAbort?.();
     this.clearTimers();
     this.readAbort.abort();
     this.pendingInput = "";

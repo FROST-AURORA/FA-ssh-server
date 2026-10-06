@@ -750,6 +750,35 @@ kbd {
 .chat-bottom {
   padding: 0 13px 8px;
 }
+.chat-target {
+  margin: 0 14px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 11px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+.message-target { overflow-wrap: anywhere; }
+.message-progress { font-size: 11px; color: var(--muted); padding: 8px 0; }
+.chat-message-error { color: #f48771; font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.tool-result {
+  margin-top: 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface);
+  font-size: 12px;
+}
+.tool-result summary { cursor: pointer; padding: 8px; overflow-wrap: anywhere; }
+.tool-result pre {
+  margin: 0;
+  padding: 8px;
+  border-top: 1px solid var(--border);
+  max-height: 240px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
 .suggestions {
   display: flex;
   flex-direction: column;

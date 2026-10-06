@@ -12,62 +12,28 @@ import {
   Sparkles,
   X,
 } from "lucide-react";
-import {
-  agents,
-  isConversation,
-  localReply,
-  newConversation,
-  readStored,
-  type Conversation,
-} from "../types";
-export function ChatPanel({ onStorageError }: { onStorageError: () => void }) {
-  const { t } = useSettings();
-  const [conversations, setConversations] = useState(() => {
-    const saved = readStored("fa-ssh.conversations.v1", isConversation, []);
-    return saved.length ? saved : [newConversation()];
-  });
-  const [activeId, setActiveId] = useState(conversations[0].id);
+import { useAgentChat, type AcquireTerminal, type AgentTarget } from "../hooks/useAgentChat";
+export function ChatPanel({ onStorageError, target, acquireTerminal }: {
+  onStorageError: () => void;
+  target: AgentTarget | null;
+  acquireTerminal: AcquireTerminal;
+}) {
+  const { t, settings } = useSettings();
+  const chat = useAgentChat(settings.serverUrl, onStorageError, acquireTerminal);
+  const { conversations, active, agents, pending } = chat;
   const [draft, setDraft] = useState("");
   const [history, setHistory] = useState(false);
   const [copied, setCopied] = useState("");
   const end = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLTextAreaElement>(null);
-  const active =
-    conversations.find((c) => c.id === activeId) ?? conversations[0];
-  useEffect(() => {
-    try {
-      localStorage.setItem(
-        "fa-ssh.conversations.v1",
-        JSON.stringify(conversations),
-      );
-    } catch {
-      onStorageError();
-    }
-  }, [conversations, onStorageError]);
+  const canSend = !!target && !!chat.selectedAgent && !pending && !chat.loading && !chat.loadError;
   useEffect(() => {
     end.current?.scrollIntoView({ block: "nearest" });
   }, [active.messages, active.id]);
-  function update(patch: Partial<Conversation>) {
-    setConversations((all) =>
-      all.map((c) => (c.id === active.id ? { ...c, ...patch } : c)),
-    );
-  }
   function send(text = draft) {
     const value = text.trim();
-    if (!value) return;
-    update({
-      title: active.messages.length === 1 ? value.slice(0, 24) : active.title,
-      messages: [
-        ...active.messages,
-        { id: crypto.randomUUID(), role: "user", content: value },
-        {
-          id: crypto.randomUUID(),
-          role: "assistant",
-          agent: active.agent,
-          content: localReply(value, active.agent),
-        },
-      ],
-    });
+    if (!value || !canSend) return;
+    void chat.send(value, target);
     setDraft("");
     input.current?.focus();
   }
@@ -90,9 +56,7 @@ export function ChatPanel({ onStorageError }: { onStorageError: () => void }) {
           <button
             className="text-button"
             onClick={() => {
-              const c = newConversation();
-              setConversations((all) => [c, ...all]);
-              setActiveId(c.id);
+              chat.newChat();
               setDraft("");
               setHistory(false);
             }}
@@ -119,7 +83,7 @@ export function ChatPanel({ onStorageError }: { onStorageError: () => void }) {
               key={c.id}
               className={c.id === active.id ? "selected" : ""}
               onClick={() => {
-                setActiveId(c.id);
+                chat.selectConversation(c.id);
                 setDraft("");
                 setHistory(false);
               }}
@@ -132,9 +96,16 @@ export function ChatPanel({ onStorageError }: { onStorageError: () => void }) {
       )}
       <div className="assistant-mode">
         <span className="status-dot" />
-        {t("本地规则助手")}
-        <span>{t("未接入模型")}</span>
+        {t("服务端智能体")}
+        <span>{t(chat.loading ? "正在加载…" : chat.loadError ? "暂无智能体" : pending ? "正在处理…" : "就绪")}</span>
       </div>
+      <div className="chat-target" role="status">
+        {pending ? `${t("正在处理")} · ${pending.target.name}` : target ? `${t("执行目标")} · ${target.name}` : t("请先连接并选中 SSH 终端")}
+      </div>
+      {chat.loadError && <div className="connection-error" role="alert">
+        <p>{t(chat.loadError)}</p>
+        <button className="text-button" onClick={chat.retry} disabled={chat.loading}>{t("重试")}</button>
+      </div>}
       <div
         className="messages"
         role="log"
@@ -150,10 +121,17 @@ export function ChatPanel({ onStorageError }: { onStorageError: () => void }) {
             )}
             <div className="message-body">
               <div className="message-author">
-                {m.role === "assistant" ? t(m.agent ?? active.agent) : t("你")}
+                {m.role === "assistant" ? t(m.agent || "AI 助手") : t("你")}
+                {m.target && <span className="message-target"> · {m.target}</span>}
               </div>
-              <div className="message-content">{m.content}</div>
-              {m.role === "assistant" && (
+              {(m.content || m.status === "streaming") && <div className="message-content">{m.content ? t(m.content) : t("正在思考并处理请求…")}</div>}
+              {m.tools?.map((tool) => <details className="tool-result" key={tool.id} open>
+                <summary>{tool.command || tool.name} · {t(tool.status === "running" ? "执行中…" : tool.status === "error" ? "执行失败" : tool.status === "unknown" ? "未收到结果" : "已返回结果")}</summary>
+                {tool.output !== undefined && <pre>{tool.output || t("无输出")}</pre>}
+              </details>)}
+              {m.status === "streaming" && <div className="message-progress" role="status">{t("正在接收回复，命令输出请查看绑定终端…")}</div>}
+              {m.error && <p className="chat-message-error" role="alert">{t(m.error)}</p>}
+              {m.role === "assistant" && m.content && (
                 <button
                   className="copy-button"
                   aria-label={t("复制回复")}
@@ -180,7 +158,7 @@ export function ChatPanel({ onStorageError }: { onStorageError: () => void }) {
         {active.messages.length === 1 && (
           <div className="suggestions">
             {[t("查看磁盘使用情况"), t("如何排查 SSH 连接失败")].map((q) => (
-              <button key={q} onClick={() => send(q)}>
+              <button key={q} disabled={!canSend} onClick={() => send(q)}>
                 <MessageSquare size={14} />
                 <span>{q}</span>
                 <ArrowRight size={14} />
@@ -216,12 +194,14 @@ export function ChatPanel({ onStorageError }: { onStorageError: () => void }) {
           <div className="composer-toolbar">
             <select
               aria-label={t("选择智能体")}
-              value={active.agent}
-              onChange={(e) => update({ agent: e.target.value })}
+              value={chat.selectedAgent?.agentId ?? ""}
+              disabled={!!pending || chat.loading || !agents.length}
+              onChange={(e) => chat.selectAgent(e.target.value)}
             >
+              {!agents.length && <option value="">{t(chat.loading ? "正在加载…" : "暂无智能体")}</option>}
               {agents.map((a) => (
-                <option key={a} value={a}>
-                  {t(a)}
+                <option key={a.agentId} value={a.agentId}>
+                  {a.agentName}
                 </option>
               ))}
             </select>
@@ -229,14 +209,14 @@ export function ChatPanel({ onStorageError }: { onStorageError: () => void }) {
               className="send-button"
               type="submit"
               aria-label={t("发送消息")}
-              disabled={!draft.trim()}
+              disabled={!draft.trim() || !canSend}
             >
               <ArrowUp size={18} />
             </button>
           </div>
         </form>
         <div className="composer-hint">
-          {t("Shift + Enter 换行 · 回复不会自动执行命令")}
+          {t("Shift + Enter 换行 · AI 可在绑定终端执行命令")}
         </div>
       </div>
     </aside>

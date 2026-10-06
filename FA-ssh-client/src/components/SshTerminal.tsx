@@ -7,9 +7,10 @@ import type { Session, SessionStatus } from "../types";
 import "@xterm/xterm/css/xterm.css";
 import { fonts, themes, useSettings } from "../settings";
 
-export default function SshTerminal({ session, active, onStatus, onController }: {
+export default function SshTerminal({ session, active, agentRunning, onStatus, onController }: {
   session: Session;
   active: boolean;
+  agentRunning: boolean;
   onStatus: (id: string, status: SessionStatus) => void;
   onController: (id: string, controller: TerminalSession | null) => void;
 }) {
@@ -100,8 +101,8 @@ export default function SshTerminal({ session, active, onStatus, onController }:
   }, [currentTheme, settings.terminalFont, settings.terminalFontSize]);
 
   useEffect(() => {
-    if (terminalRef.current) terminalRef.current.options.disableStdin = executing || session.status !== "running";
-  }, [executing, session.status]);
+    if (terminalRef.current) terminalRef.current.options.disableStdin = executing || agentRunning || session.status !== "running";
+  }, [executing, agentRunning, session.status]);
 
   useEffect(() => {
     if (!active) return;
@@ -115,11 +116,12 @@ export default function SshTerminal({ session, active, onStatus, onController }:
   return (
     <div className="terminal-workspace">
       <div className="terminal-container" ref={container} aria-label={`${session.server.name} SSH 终端`} />
+      {agentRunning && <div className="message-progress" role="status">{t("AI 正在使用此终端，命令与结果会实时显示。")}</div>}
       {commandError && <p className="form-error" role="alert">{commandError}</p>}
       <form className="terminal-command" onSubmit={async (event) => {
         event.preventDefault();
         const controller = controllerRef.current;
-        if (!controller || !command.trim() || executing || session.status !== "running") return;
+        if (!controller || !command.trim() || executing || agentRunning || session.status !== "running") return;
         setExecuting(true);
         setCommandError("");
         try {
@@ -133,8 +135,8 @@ export default function SshTerminal({ session, active, onStatus, onController }:
       }}>
         <input aria-label={t("执行单条命令")} placeholder={t("输入命令，Enter 执行")}
           value={command} onChange={(event) => setCommand(event.target.value)}
-          disabled={executing || session.status !== "running"} autoComplete="off" spellCheck={false} />
-        <button className="secondary" type="submit" disabled={executing || session.status !== "running" || !command.trim()}>
+          disabled={executing || agentRunning || session.status !== "running"} autoComplete="off" spellCheck={false} />
+        <button className="secondary" type="submit" disabled={executing || agentRunning || session.status !== "running" || !command.trim()}>
           {t(executing ? "执行中…" : "执行命令")}
         </button>
       </form>

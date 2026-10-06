@@ -148,6 +148,29 @@ function SshWorkspace() {
       throw error;
     }
   }
+  async function acquireAgentTerminal(id: string, abort: () => void) {
+    const controller = controllers.current.get(id);
+    if (!controller || terminalLocks.current.has(id) || connections.busy[id]) {
+      throw new Error("SSH 终端尚未就绪，请稍后重试。");
+    }
+    terminalLocks.current.add(id);
+    setTerminalBusy((all) => ({ ...all, [id]: "AI 处理中" }));
+    const release = () => {
+      controller.endAgentRun();
+      terminalLocks.current.delete(id);
+      if (mounted.current) setTerminalBusy((all) => {
+        const next = { ...all };
+        delete next[id];
+        return next;
+      });
+    };
+    try {
+      return { terminalSessionId: await controller.beginAgentRun(abort), release };
+    } catch (error) {
+      release();
+      throw error;
+    }
+  }
   async function connect(server: Server) {
     if (busy[server.id]) return;
     setMobilePanel("terminal");
@@ -287,7 +310,7 @@ function SshWorkspace() {
           title={t("使用帮助")}
           onClick={() =>
             setNotice(
-              "添加连接后，双击服务器或点击连接打开远程终端。支持直接输入、粘贴及单条命令执行。关闭标签会释放终端并断开 SSH。Ctrl+K 搜索，Ctrl+N 新建连接。AI 区域当前为本地规则助手。",
+              "添加连接后，双击服务器或点击连接打开远程终端。在 AI 区域选择智能体并输入任务，命令和结果会显示在绑定的终端，AI 回复显示在对话栏。Ctrl+K 搜索，Ctrl+N 新建连接。",
             )
           }
         >
@@ -587,12 +610,15 @@ function SshWorkspace() {
             key={session.generation}
             className={`session-view ${activeId === session.id ? "active" : ""}`}
           >
-            <SshTerminal session={session} active={activeId === session.id}
+            <SshTerminal session={session} active={activeId === session.id} agentRunning={terminalBusy[session.id] === "AI 处理中"}
               onStatus={onTerminalStatus} onController={registerController} />
           </div>
         ))}
       </section>
-      <ChatPanel onStorageError={storageError} />
+      <ChatPanel onStorageError={storageError} acquireTerminal={acquireAgentTerminal}
+        target={activeSession?.status === "running" && !busy[activeSession.id]
+          ? { id: activeSession.id, name: `${activeSession.server.name} (${activeSession.server.username}@${activeSession.server.host})` }
+          : null} />
       <footer className="statusbar">
         <span className="remote-indicator">
           <Command size={13} />
@@ -611,7 +637,7 @@ function SshWorkspace() {
         <span>LF</span>
         <span className="status-ai">
           <Settings2 size={12} />
-          {t("本地助手")}
+          {t("服务端智能体")}
         </span>
       </footer>
       {notice && (
