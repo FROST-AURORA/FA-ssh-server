@@ -1,5 +1,6 @@
 package com.FA.ai.cases.react.factory;
 
+import com.FA.ai.api.dto.ReActResultDTO;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -29,8 +30,6 @@ import java.util.concurrent.atomic.AtomicInteger;
  * LoopDecisionNode → 判断是否继续（max_steps / finish / 无工具调用）
  * UserFeedbackNode → 发送最终结果，完成 SSE
  * </pre>
- *
- * @author xiaofuge bugstack.cn @小傅哥
  */
 public class DefaultReActFactory {
 
@@ -141,7 +140,29 @@ public class DefaultReActFactory {
         // ══════════════════════════════════════════════════════════
 
         /** 最终结果 DTO */
-        private com.FA.ai.api.dto.ReActResultDTO result;
+        private ReActResultDTO result;
+
+        // ══════════════════════════════════════════════════════════
+        //  工具定义（参考 WaLiCode ai.ts）
+        // ══════════════════════════════════════════════════════════
+
+        /**
+         * 工具回调列表（从 ArmoryService 装配链路获取）
+         */
+        private org.springframework.ai.tool.ToolCallback[] toolCallbacks;
+
+        /**
+         * 是否使用 Anthropic 格式（tool_call_id vs tool_use_id）
+         */
+        private boolean useAnthropicFormat;
+
+        // ══════════════════════════════════════════════════════════
+        //  上下文记忆（Phase 1: 动态 Prompt 构建）
+        // ══════════════════════════════════════════════════════════
+
+        /** 最近执行的命令记录（用于注入到动态 Prompt 中） */
+        @Builder.Default
+        private List<String> recentCommands = new ArrayList<>();
 
         // ══════════════════════════════════════════════════════════
         //  辅助方法
@@ -187,8 +208,18 @@ public class DefaultReActFactory {
         }
 
         public void appendToolMessage(String toolCallId, String content) {
-            Map<String, Object> msg = Map.of("role", "tool", "tool_call_id", toolCallId, "content", content);
+            Map<String, Object> msg = useAnthropicFormat
+                    ? Map.of("type", "tool_result", "tool_use_id", toolCallId, "content", content)
+                    : Map.of("role", "tool", "tool_call_id", toolCallId, "content", content);
             messageHistory.add(msg);
+        }
+
+        public void addRecentCommand(String command) {
+            if (command == null || command.trim().isEmpty()) return;
+            recentCommands.add(command.trim());
+            while (recentCommands.size() > 20) {
+                recentCommands.remove(0);
+            }
         }
 
     }

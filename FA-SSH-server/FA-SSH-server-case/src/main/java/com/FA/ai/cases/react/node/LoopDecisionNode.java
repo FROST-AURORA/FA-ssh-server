@@ -28,8 +28,6 @@ import java.util.Map;
  * <p>循环条件：
  * - 上一轮有工具调用（继续对话）
  * - AI 未返回终止指令
- *
- * @author xiaofuge bugstack.cn @小傅哥
  */
 @Slf4j
 @Component("reactLoopDecisionNode")
@@ -37,7 +35,7 @@ public class LoopDecisionNode extends AbstractAIAgentReActSupport {
 
     @Override
     protected ReActResultDTO doApply(ChatRequestDTO requestParameter, DefaultReActFactory.DynamicContext dynamicContext) throws Exception {
-        log.info("ReAct LoopDecisionNode - 循环决策，当前步数: {}/{}",
+        log.info("ReAct LoopDecisionNode - 循环决策，当前步数: {}/{}", 
                 dynamicContext.getStep(), dynamicContext.getMaxSteps());
 
         // 1. 检查是否已有终止原因
@@ -82,6 +80,7 @@ public class LoopDecisionNode extends AbstractAIAgentReActSupport {
         }
 
         // 6. 检查上一轮是否有工具调用（继续 ReAct 循环的条件）
+        //    如果上一轮有工具调用，说明 AI 还在通过工具完成任务，需要继续对话
         List<Map<String, Object>> currentToolCalls = dynamicContext.getCurrentToolCalls();
         if (currentToolCalls != null && !currentToolCalls.isEmpty()) {
             log.info("上一轮有 {} 个工具调用，继续 ReAct 循环", currentToolCalls.size());
@@ -118,6 +117,7 @@ public class LoopDecisionNode extends AbstractAIAgentReActSupport {
                     dynamicContext.getResult().setMaxStepsReached(true);
                     break;
                 case "max_tool_calls":
+                    break;
                 case "completed":
                 case "finish":
                 default:
@@ -155,7 +155,11 @@ public class LoopDecisionNode extends AbstractAIAgentReActSupport {
         }
 
         // 标签风格: <answer>finish(...)</answer>
-        return lower.contains("<answer>") && lower.contains("finish");
+        if (lower.contains("<answer>") && lower.contains("finish")) {
+            return true;
+        }
+
+        return false;
     }
 
 }

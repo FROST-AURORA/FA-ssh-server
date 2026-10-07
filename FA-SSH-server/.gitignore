@@ -1,0 +1,2 @@
+# Local SSH credentials
+/FA-SSH-server-app/src/test/resources/ssh-config.local

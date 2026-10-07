@@ -6,11 +6,11 @@ import com.FA.ai.cases.react.AbstractAIAgentReActSupport;
 import com.FA.ai.cases.react.factory.DefaultReActFactory;
 import com.FA.ai.domain.agent.service.armory.matter.tools.SshExecuteAdkTool;
 import cn.bugstack.wrench.design.framework.tree.StrategyHandler;
+import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import org.springframework.web.servlet.mvc.method.annotation.ResponseBodyEmitter;
 
-import jakarta.annotation.Resource;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -43,8 +43,6 @@ import java.util.Map;
  *               └→ [无工具调用] LoopDecisionNode
  *                     └→ UserFeedbackNode
  * </pre>
- *
- * @author xiaofuge bugstack.cn @小傅哥
  */
 @Slf4j
 @Component("reactToolCallNode")
@@ -148,6 +146,7 @@ public class ToolCallNode extends AbstractAIAgentReActSupport {
         }
 
         // 清除本轮工具调用标记，避免重复路由
+        // 注意：toolResults 保留，供 UserFeedbackNode 构建最终结果
         dynamicContext.getCurrentToolCalls().clear();
     }
 
@@ -158,6 +157,7 @@ public class ToolCallNode extends AbstractAIAgentReActSupport {
     /**
      * 手动执行工具调用
      * <p>当 ADK 未自动执行工具时，由 ToolCallNode 直接执行
+     * <p>适用于：自定义工具、MCP 工具、需要预处理/后处理的场景
      */
     private void handleManualToolExecution(DefaultReActFactory.DynamicContext dynamicContext,
                                             List<Map<String, Object>> toolCalls,
@@ -217,20 +217,21 @@ public class ToolCallNode extends AbstractAIAgentReActSupport {
     private String executeTool(String toolName, String argsStr) throws Exception {
         log.info("手动执行工具: name={}, args={}", toolName, argsStr);
 
-        return switch (toolName) {
-            case "executeCommand", "execute_command", "run_command" -> executeSshTool(argsStr);
-            default -> {
+        switch (toolName) {
+            case "executeCommand":
+            case "execute_command":
+            case "run_command":
+                return executeSshTool(argsStr);
+            default:
                 log.warn("未知工具: {}", toolName);
-                yield "Unknown tool: " + toolName + ". Available tools: executeCommand";
-            }
-        };
+                return "Unknown tool: " + toolName + ". Available tools: executeCommand";
+        }
     }
 
     /**
      * 执行 SSH 工具
      * <p>调用 SshExecuteAdkTool.executeCommand() 执行 SSH 命令
      */
-    @SuppressWarnings("unchecked")
     private String executeSshTool(String argsStr) throws Exception {
         // 1. 解析参数
         String command = parseToolArg(argsStr, "command");

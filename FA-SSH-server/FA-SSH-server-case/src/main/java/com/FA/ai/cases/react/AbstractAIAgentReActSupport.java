@@ -65,7 +65,7 @@ public abstract class AbstractAIAgentReActSupport extends AbstractMultiThreadStr
      */
     @SuppressWarnings("unchecked")
     protected <T> T getBean(String beanName) {
-        return (T) applicationContext.getBean(beanName);
+        return applicationContext.getBean(beanName, (Class<T>) Object.class);
     }
 
     // ═══════════════════════════════════════════════════════════════
