@@ -4,6 +4,8 @@ import com.FA.ai.api.dto.ChatRequestDTO;
 import com.FA.ai.api.dto.ReActResultDTO;
 import com.FA.ai.cases.react.AbstractAIAgentReActSupport;
 import com.FA.ai.cases.react.factory.DefaultReActFactory;
+import com.FA.ai.domain.agent.service.IChatContextService;
+import com.FA.ai.domain.agent.service.IPromptService;
 import com.FA.ai.domain.agent.service.armory.matter.tools.SshExecuteAdkTool;
 import cn.bugstack.wrench.design.framework.tree.StrategyHandler;
 import jakarta.annotation.Resource;
@@ -43,6 +45,8 @@ import java.util.Map;
  *               └→ [无工具调用] LoopDecisionNode
  *                     └→ UserFeedbackNode
  * </pre>
+ *
+ * @author xiaofuge bugstack.cn @小傅哥
  */
 @Slf4j
 @Component("reactToolCallNode")
@@ -50,6 +54,12 @@ public class ToolCallNode extends AbstractAIAgentReActSupport {
 
     @Resource
     private SshExecuteAdkTool sshExecuteAdkTool;
+
+    @Resource
+    private IPromptService promptService;
+
+    @Resource
+    private IChatContextService chatContextService;
 
     @Override
     protected ReActResultDTO doApply(ChatRequestDTO requestParameter, DefaultReActFactory.DynamicContext dynamicContext) throws Exception {
@@ -201,6 +211,10 @@ public class ToolCallNode extends AbstractAIAgentReActSupport {
 
             // 追加 tool 消息到消息历史（供下一轮 AI 调用使用）
             dynamicContext.appendToolMessage(toolCallId, resultContent);
+
+            // 记录里程碑和工具执行摘要（供下一轮 Prompt 注入）
+            promptService.detectAndRecordMilestone(dynamicContext.getSessionId(), "tool", resultContent);
+            chatContextService.pushToolResult(dynamicContext.getSessionId(), toolName, resultContent);
 
             // 发送 tool_result SSE 事件
             sendToolResultEvent(emitter, toolCallId, resultContent, status);

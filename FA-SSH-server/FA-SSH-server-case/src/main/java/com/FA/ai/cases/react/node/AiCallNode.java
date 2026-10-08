@@ -5,6 +5,7 @@ import com.FA.ai.api.dto.ReActResultDTO;
 import com.FA.ai.cases.react.AbstractAIAgentReActSupport;
 import com.FA.ai.cases.react.factory.DefaultReActFactory;
 import com.FA.ai.domain.agent.model.valobj.AiAgentRegisterVO;
+import com.FA.ai.domain.agent.service.IChatContextService;
 import com.FA.ai.domain.agent.service.IPromptService;
 import com.FA.ai.domain.agent.service.armory.factory.DefaultArmoryFactory;
 import com.FA.ai.domain.agent.service.armory.matter.tools.SshExecuteAdkTool;
@@ -20,10 +21,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import org.springframework.web.servlet.mvc.method.annotation.ResponseBodyEmitter;
 
-import java.util.HashMap;
-import java.util.Iterator;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 
 /**
  * AI 调用节点（ReAct 循环核心）
@@ -47,6 +45,8 @@ import java.util.Map;
  *         ├→ [stateDelta 有结果] ToolCallNode → AiCallNode（循环）
  *         └→ [无工具调用] LoopDecisionNode → UserFeedbackNode
  * </pre>
+ *
+ * @author xiaofuge bugstack.cn @小傅哥
  */
 @Slf4j
 @Component("reactAiCallNode")
@@ -57,6 +57,9 @@ public class AiCallNode extends AbstractAIAgentReActSupport {
 
     @Resource
     private IPromptService promptService;
+
+    @Resource
+    private IChatContextService chatContextService;
 
     /** tool name 映射：stateDelta key -> tool name */
     private static final Map<String, String> STATE_DELTA_TOOL_MAPPING = Map.of(
@@ -83,27 +86,31 @@ public class AiCallNode extends AbstractAIAgentReActSupport {
         // 3. 重置当前轮次缓冲
         dynamicContext.resetRoundBuffers();
 
-        // 4. 绑定终端会话 ID
+        // 4. 裁剪消息历史（优先级 + 滑动窗口混合策略，8000 token 预算） - 这部分也可以作为配置，根据模型不同来调整。
+        List<Map<String, Object>> trimmedHistory = chatContextService.trimHistory(dynamicContext.getMessageHistory(), 8000);
+        dynamicContext.setMessageHistory(new ArrayList<>(trimmedHistory));
+
+        // 5. 绑定终端会话 ID
         String terminalSessionId = dynamicContext.getTerminalSessionId();
         if (terminalSessionId != null && !terminalSessionId.isEmpty()) {
             SshExecuteAdkTool.setCurrentTerminalSession(terminalSessionId);
         }
 
-        // 5. 构建动态上下文并注入用户消息
+        // 6. 构建动态上下文并注入用户消息
         String enrichedMessage = buildEnrichedMessage(lastUserMessage, dynamicContext);
         log.debug("注入动态上下文后消息长度: {} -> {}", lastUserMessage.length(), enrichedMessage.length());
 
-        // 6. 构建用户消息
+        // 7. 构建用户消息
         Content userContent = Content.builder()
                 .role("user")
                 .parts(Part.builder().text(enrichedMessage).build())
                 .build();
 
-        // 7. 重置 ReAct 循环标志
+        // 8. 重置 ReAct 循环标志
         dynamicContext.setStopReason(null);
         dynamicContext.setErrorMessage(null);
 
-        // 8. 调用 ADK Runner 并处理事件流
+        // 9. 调用 ADK Runner 并处理事件流
         ResponseBodyEmitter emitter = dynamicContext.getEmitter();
         StringBuilder textAccumulator = new StringBuilder();
         int roundToolCalls = 0;
@@ -134,7 +141,7 @@ public class AiCallNode extends AbstractAIAgentReActSupport {
                         event.finalResponse(),
                         event.stringifyContent().length());
 
-                // 8.1 处理文本内容（模型的响应文本，包括工具调用后的总结）
+                // 9.1 处理文本内容（模型的响应文本，包括工具调用后的总结）
                 String eventText = event.stringifyContent();
                 if (!eventText.isBlank()) {
                     textAccumulator.append(eventText);
@@ -142,7 +149,7 @@ public class AiCallNode extends AbstractAIAgentReActSupport {
                     sendTextEvent(emitter, eventText, textAccumulator.toString());
                 }
 
-                // 8.2 从 stateDelta 检测工具执行结果
+                // 9.2 从 stateDelta 检测工具执行结果
                 EventActions actions = event.actions();
                 if (actions != null) {
                     Map<String, Object> stateDelta = actions.stateDelta();
@@ -197,11 +204,14 @@ public class AiCallNode extends AbstractAIAgentReActSupport {
                             // 记录里程碑（工具结果）
                             promptService.detectAndRecordMilestone(
                                     dynamicContext.getSessionId(), "tool", resultContent);
+
+                            // 记录到上下文提供者中（生成工具执行摘要，供下一轮 Prompt 注入）
+                            chatContextService.pushToolResult(dynamicContext.getSessionId(), toolName, resultContent);
                         }
                     }
                 }
 
-                // 8.3 记录 assistant 内容到消息历史
+                // 9.3 记录 assistant 内容到消息历史
                 if (event.content().isPresent()) {
                     Content content = event.content().get();
                     String role = content.role().orElse("assistant");
@@ -229,7 +239,7 @@ public class AiCallNode extends AbstractAIAgentReActSupport {
             }
         }
 
-        // 9. 更新步数和工具调用统计
+        // 10. 更新步数和工具调用统计
         dynamicContext.incrementStep();
         dynamicContext.getResult().setTotalSteps(dynamicContext.getStep());
         dynamicContext.getResult().setTotalToolCalls(
@@ -239,7 +249,7 @@ public class AiCallNode extends AbstractAIAgentReActSupport {
         log.info("ReAct AiCallNode - 第 {} 步完成，本轮工具调用 {} 次，文本长度 {}",
                 dynamicContext.getStep(), roundToolCalls, textAccumulator.length());
 
-        // 10. 发送本轮结束事件
+        // 11. 发送本轮结束事件
         sendRoundEndEvent(
                 dynamicContext.getEmitter(),
                 dynamicContext.getStep(),
@@ -248,12 +258,12 @@ public class AiCallNode extends AbstractAIAgentReActSupport {
                 dynamicContext.getResult().getTotalToolCalls()
         );
 
-        // 11. 错误处理
+        // 12. 错误处理
         if (hasError) {
             dynamicContext.setStopReason("error");
         }
 
-        // 12. 路由
+        // 13. 路由
         return router(requestParameter, dynamicContext);
     }
 
@@ -380,7 +390,8 @@ public class AiCallNode extends AbstractAIAgentReActSupport {
                 userMessage,
                 dynamicContext.getSessionId(),
                 dynamicContext.getTerminalSessionId(),
-                dynamicContext.getRecentCommands()
+                dynamicContext.getRecentCommands(),
+                dynamicContext.getMessageHistory()
         );
     }
 
