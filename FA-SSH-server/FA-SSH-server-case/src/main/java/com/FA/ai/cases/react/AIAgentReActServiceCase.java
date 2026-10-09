@@ -5,12 +5,11 @@ import com.FA.ai.api.dto.ReActResultDTO;
 import com.FA.ai.cases.IAIAgentReActServiceCase;
 import com.FA.ai.cases.react.factory.DefaultReActFactory;
 import com.FA.ai.cases.react.node.RootNode;
+import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.jetbrains.annotations.NotNull;
 import org.springframework.stereotype.Service;
 import org.springframework.web.servlet.mvc.method.annotation.ResponseBodyEmitter;
-
-import jakarta.annotation.Resource;
 
 /**
  * AI 智能体 ReAct 执行服务实现
@@ -21,8 +20,6 @@ import jakarta.annotation.Resource;
  *
  * <p>节点链路：
  * RootNode → AiCallNode → LoopDecisionNode → UserFeedbackNode
- *
- * @author xiaofuge bugstack.cn @小傅哥
  */
 @Slf4j
 @Service
@@ -89,7 +86,7 @@ public class AIAgentReActServiceCase implements IAIAgentReActServiceCase {
                     .build();
 
             ReActResultDTO result = rootNode.apply(requestDTO, dynamicContext);
-            return result.getContent();
+            return result.getFinalResponse();
 
         } catch (Exception e) {
             log.error("ReAct 普通对话异常", e);

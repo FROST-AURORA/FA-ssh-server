@@ -10,7 +10,7 @@ import com.FA.ai.domain.agent.service.armory.matter.tools.SshExecuteAdkTool;
 import com.FA.ai.types.enums.ResponseCode;
 import com.FA.ai.types.exception.AppException;
 import com.google.adk.events.Event;
-import com.google.adk.runner.InMemoryRunner;
+import com.google.adk.runner.Runner;
 import com.google.adk.sessions.Session;
 import com.google.genai.types.Content;
 import com.google.genai.types.Part;
@@ -61,7 +61,7 @@ public class ChatService implements IChatService {
         }
 
         String appName = aiAgentRegisterVO.getAppName();
-        InMemoryRunner runner = aiAgentRegisterVO.getRunner();
+        Runner runner = aiAgentRegisterVO.getRunner();
 
         return userSessions.computeIfAbsent(userId, uid -> {
             Session session = runner.sessionService().createSession(appName, uid)
@@ -93,7 +93,7 @@ public class ChatService implements IChatService {
             throw new AppException(ResponseCode.E0001.getCode());
         }
 
-        InMemoryRunner runner = aiAgentRegisterVO.getRunner();
+        Runner runner = aiAgentRegisterVO.getRunner();
 
         Content userMsg = Content.fromParts(Part.fromText(message));
         Flowable<Event> events = runner.runAsync(userId, sessionId, userMsg);
@@ -112,7 +112,7 @@ public class ChatService implements IChatService {
             throw new AppException(ResponseCode.E0001.getCode());
         }
 
-        InMemoryRunner runner = aiAgentRegisterVO.getRunner();
+        Runner runner = aiAgentRegisterVO.getRunner();
 
         Content userMsg = Content.fromParts(Part.fromText(message));
         return runner.runAsync(userId, sessionId, userMsg);
@@ -126,7 +126,7 @@ public class ChatService implements IChatService {
             throw new AppException(ResponseCode.E0001.getCode());
         }
 
-        InMemoryRunner runner = aiAgentRegisterVO.getRunner();
+        Runner runner = aiAgentRegisterVO.getRunner();
 
         // 设置终端会话ID到ThreadLocal，供 MCP 工具使用
         if (terminalSessionId != null && !terminalSessionId.isEmpty()) {
@@ -173,7 +173,7 @@ public class ChatService implements IChatService {
         Content content = Content.builder().role("user").parts(parts).build();
 
         // 获取运行体
-        InMemoryRunner runner = aiAgentRegisterVO.getRunner();
+        Runner runner = aiAgentRegisterVO.getRunner();
 
         Flowable<Event> events = runner.runAsync(chatCommandEntity.getUserId(), chatCommandEntity.getSessionId(), content);
 

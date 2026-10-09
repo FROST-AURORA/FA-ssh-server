@@ -5,10 +5,11 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.util.List;
+import java.util.Map;
+
 /**
  * ReAct 执行结果 DTO
- *
- * @author xiaofuge bugstack.cn @小傅哥
  */
 @Data
 @Builder
@@ -19,7 +20,7 @@ public class ReActResultDTO {
     /**
      * 最终响应内容
      */
-    private String content;
+    private String finalResponse;
 
     /**
      * 总执行步数
@@ -54,12 +55,12 @@ public class ReActResultDTO {
     /**
      * 工具调用列表
      */
-    private java.util.List<java.util.Map<String, Object>> toolCalls;
+    private List<Map<String, Object>> toolCalls;
 
     /**
      * 工具执行结果列表
      */
-    private java.util.List<java.util.Map<String, Object>> toolResults;
+    private List<Map<String, Object>> toolResults;
 
     /**
      * 错误信息（如有）

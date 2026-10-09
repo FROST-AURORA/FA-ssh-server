@@ -36,8 +36,6 @@ import java.util.Map;
  * </pre>
  * 容错设计：每条命令独立 try-catch（safeExec），单条失败仅该字段留空，
  * 环境采集是"锦上添花"，绝不阻断主流程。
- *
- * @author xiaofuge bugstack.cn @小傅哥
  */
 @Component
 public class TerminalStateProvider implements ContextProvider {
@@ -68,10 +66,10 @@ public class TerminalStateProvider implements ContextProvider {
             return result;
         }
 
-        String osInfo = safeExec(terminalSessionId, "uname -srm");
-        String user = safeExec(terminalSessionId, "whoami");
-        String pwd = safeExec(terminalSessionId, "pwd");
-        String uptime = safeExec(terminalSessionId, "uptime -p 2>/dev/null || uptime");
+        String osInfo = safeExec(terminalSessionId, "uname -srm"); // 操作系统/架构
+        String user = safeExec(terminalSessionId, "whoami"); // 当前登录用户
+        String pwd = safeExec(terminalSessionId, "pwd"); // 当前工作目录
+        String uptime = safeExec(terminalSessionId, "uptime -p 2>/dev/null || uptime"); // 运行时长
 
         result.put("osInfo", osInfo);
         result.put("currentUser", user);

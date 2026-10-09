@@ -11,6 +11,7 @@ import java.util.Map;
  *   <li>聚合各 ContextProvider 输出，组装 PromptContextVO</li>
  *   <li>在 token 预算内裁剪消息历史</li>
  *   <li>接收工具执行结果，供后续生成摘要</li>
+ *   <li>清理指定会话的上下文缓存</li>
  * </ul>
  * 在整体架构中的位置：
  * <pre>
@@ -22,6 +23,8 @@ import java.util.Map;
  *              +-- context/provider/impl/*Provider  （上下文采集：环境/任务/里程碑/工具摘要）
  *              +-- context/reducer/impl/*Reducer    （消息裁剪：优先级/滑动窗口/混合）
  * </pre>
+ *
+ * @author xiaofuge bugstack.cn @小傅哥
  */
 public interface IChatContextService {
 
@@ -53,4 +56,11 @@ public interface IChatContextService {
      * @param result    执行结果
      */
     void pushToolResult(String sessionId, String toolName, String result);
+
+    /**
+     * 清理指定会话的上下文缓存
+     *
+     * @param sessionId 会话 ID
+     */
+    void clearSessionContext(String sessionId);
 }
