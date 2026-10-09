@@ -47,8 +47,16 @@ public class PromptService implements IPromptService {
 
     @Override
     public String buildEnrichedMessage(String userMessage, String sessionId, String userId, String terminalSessionId, List<String> recentCommands, List<Map<String, Object>> messageHistory) {
+        // 向后兼容：无意图标签的重载，委托给带 intentLabel 的版本（传 null）
+        return buildEnrichedMessage(userMessage, sessionId, userId, terminalSessionId, recentCommands, messageHistory, null);
+    }
+
+    @Override
+    public String buildEnrichedMessage(String userMessage, String sessionId, String userId, String terminalSessionId, List<String> recentCommands, List<Map<String, Object>> messageHistory, String intentLabel) {
+        // 意图标签流转：intentLabel → PromptContextVO.intentLabel → DynamicPromptBuilder 前缀
         PromptContextVO promptContextVO = chatContextService.buildPromptContext(sessionId, userId, terminalSessionId, messageHistory);
         promptContextVO.setRecentCommands(recentCommands);
+        promptContextVO.setIntentLabel(intentLabel);
 
         String prefix = dynamicPromptBuilder.buildMessagePrefix(promptContextVO);
         if (prefix.isEmpty()) {

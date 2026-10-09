@@ -5,10 +5,13 @@ import com.FA.ai.api.dto.ReActResultDTO;
 import com.FA.ai.cases.react.AbstractAIAgentReActSupport;
 import com.FA.ai.cases.react.factory.DefaultReActFactory;
 import com.FA.ai.domain.agent.model.valobj.AiAgentRegisterVO;
+import com.FA.ai.domain.agent.model.valobj.intent.IntentResultVO;
 import com.FA.ai.domain.agent.service.IChatContextService;
+import com.FA.ai.domain.agent.service.IIntentService;
 import com.FA.ai.domain.agent.service.IPromptService;
 import com.FA.ai.domain.agent.service.armory.factory.DefaultArmoryFactory;
 import com.FA.ai.domain.agent.service.armory.matter.tools.SshExecuteAdkTool;
+import com.FA.ai.domain.agent.service.intent.IntentService;
 import cn.bugstack.wrench.design.framework.tree.StrategyHandler;
 import com.google.adk.agents.RunConfig;
 import com.google.adk.events.Event;
@@ -45,6 +48,20 @@ import java.util.*;
  *         ├→ [stateDelta 有结果] ToolCallNode → AiCallNode（循环）
  *         └→ [无工具调用] LoopDecisionNode → UserFeedbackNode
  * </pre>
+ *
+ * <p>意图识别接入（Phase 3）：本节点是意图子系统与 ReAct 主链路的唯一接入点，
+ * 负责三件事——识别、注入、反馈：
+ * <pre>
+ *   doApply()
+ *     ┌─ 识别：intentService.configure(agentApi) + classify(msg)
+ *     │        → 结果存入 dynamicContext.currentIntent / currentIntentResult
+ *     │        → COMPOUND/UNKNOWN/低置信度 不硬路由，全交主模型
+ *     ├─ 注入：buildEnrichedMessageWithDynamicContext()
+ *     │        → currentIntent 经 PromptContextVO.intentLabel 进入消息前缀 [用户意图]
+ *     └─ 反馈：工具执行后 handleIntentFeedback(toolResult)
+ *              → 失败且走偏时 reportFeedback 重分类，更新 currentIntent
+ * </pre>
+ * 意图标签只做"提示"不做"硬路由"：即便识别为 DIAGNOSE，主模型仍可自主决定调用哪些工具。
  */
 @Slf4j
 @Component("reactAiCallNode")
@@ -58,6 +75,9 @@ public class AiCallNode extends AbstractAIAgentReActSupport {
 
     @Resource
     private IChatContextService chatContextService;
+
+    @Resource
+    private IIntentService intentService;
 
     /** tool name 映射：stateDelta key -> tool name */
     private static final Map<String, String> STATE_DELTA_TOOL_MAPPING = Map.of(
@@ -80,6 +100,30 @@ public class AiCallNode extends AbstractAIAgentReActSupport {
 
         // 2. 获取最新用户消息
         String lastUserMessage = getLastUserMessage(requestParameter, dynamicContext);
+
+        // [Phase 3] 意图识别 —— 注入当前 Agent 的 API 配置后，再识别用户意图
+        // 复用智能体自己的模型配置，不单独配置意图识别模型
+        // 步骤：①configure 注入 API → ②classify 识别 → ③存入上下文 → ④不硬路由
+        if (aiAgentRegisterVO.getOpenAiApi() != null) {
+            intentService.configure(aiAgentRegisterVO.getOpenAiApi(), aiAgentRegisterVO.getChatModelName());
+        }
+        IntentResultVO intentResult = intentService.classify(
+                dynamicContext.getSessionId(), dynamicContext.getUserId(), lastUserMessage);
+        log.info("识别到用户意图: {}, 置信度: {}, 候选: {}, 重分类: {}",
+                intentResult.getIntent().getLabel(),
+                intentResult.getConfidence(),
+                intentResult.getCandidateIntents(),
+                intentResult.isReclassified());
+        // 将意图保存到上下文供后续使用
+        dynamicContext.setCurrentIntent(intentResult.getIntent().name());
+        dynamicContext.setCurrentIntentResult(intentResult);
+        // COMPOUND / UNKNOWN / 低置信度：交给主模型自行判断，不再硬路由
+        if (intentResult.getIntent() == com.FA.ai.domain.agent.model.valobj.intent.IntentTypeEnumVO.COMPOUND) {
+            log.info("复合意图，候选 {} —— 交由主模型拆解", intentResult.getCandidateIntents());
+        } else if (intentResult.getIntent() == com.FA.ai.domain.agent.model.valobj.intent.IntentTypeEnumVO.UNKNOWN
+                || intentResult.getConfidence() < 0.5) {
+            log.info("意图不确定 ({}，conf={}) —— 全交主模型决策", intentResult.getIntent(), intentResult.getConfidence());
+        }
 
         // 3. 重置当前轮次缓冲
         dynamicContext.resetRoundBuffers();
@@ -217,6 +261,9 @@ public class AiCallNode extends AbstractAIAgentReActSupport {
 
                             // 记录到上下文提供者中（生成工具执行摘要，供下一轮 Prompt 注入）
                             chatContextService.pushToolResult(dynamicContext.getSessionId(), toolName, resultContent);
+
+                            // 反馈回路：根据工具结果判定当前意图是否走偏，必要时重分类
+                            handleIntentFeedback(dynamicContext, resultContent);
                         }
                     }
                 }
@@ -353,21 +400,64 @@ public class AiCallNode extends AbstractAIAgentReActSupport {
     }
 
     /**
+     * 反馈回路：根据工具执行结果判定当前意图是否需要重分类。
+     * <p>
+     * 仅在本轮已有意图识别结果时触发；reportFeedback 返回非 null 表示已重分类，
+     * 此时更新 DynamicContext 的当前意图，使后续步骤（Prompt 注入、路由）使用新意图。
+     * <p>
+     * 流程：
+     * <pre>
+     *   工具执行完(result)
+     *     ├─ 无本轮意图结果 → 直接返回
+     *     ├─ 判定 success（非空 && 不像意图走偏）
+     *     └─ intentService.reportFeedback(...)
+     *          ├─ 返回 null  → 维持原意图
+     *          └─ 返回新结果 → 更新 currentIntent / currentIntentResult
+     * </pre>
+     * 案例：意图 CONFIGURE，工具结果 "No such file" → success=false →
+     *       reportFeedback 用候选 MONITOR 递补 → 后续 Prompt 注入 [用户意图] 监控查看。
+     */
+    private void handleIntentFeedback(DefaultReActFactory.DynamicContext dynamicContext, String toolResult) {
+        IntentResultVO lastIntent = dynamicContext.getCurrentIntentResult();
+        if (lastIntent == null) {
+            return;
+        }
+        // 复用 IntentService 的失败特征判定，保持两处逻辑一致
+        boolean success = toolResult != null && !toolResult.isBlank()
+                && !IntentService.looksLikeIntentMismatch(toolResult);
+
+        IntentResultVO reclassified = intentService.reportFeedback(
+                dynamicContext.getSessionId(), lastIntent, success, toolResult);
+        if (reclassified != null) {
+            log.info("反馈回路触发重分类: {} -> {} (conf={})",
+                    lastIntent.getIntent(), reclassified.getIntent(), reclassified.getConfidence());
+            dynamicContext.setCurrentIntent(reclassified.getIntent().name());
+            dynamicContext.setCurrentIntentResult(reclassified);
+        }
+    }
+
+    /**
      * 构建注入了动态上下文的用户消息
      * 委托 IPromptService 完成环境采集、里程碑获取、前缀构建
+     * <p>
+     * 意图注入路径：dynamicContext.currentIntent → buildEnrichedMessage(intentLabel)
+     * → PromptContextVO.intentLabel → DynamicPromptBuilder 输出 "[用户意图] xxx" 前缀，
+     * 让主模型感知当前意图但不强制路由。
      */
     private String buildEnrichedMessage(String userMessage, DefaultReActFactory.DynamicContext dynamicContext) {
         // 记录用户消息的里程碑
         promptService.detectAndRecordMilestone(dynamicContext.getSessionId(), "user", userMessage);
 
         // 委托领域服务构建富化消息 (传入真实 userId)
+        // 注意：意图标签通过 PromptContextVO.intentLabel 传递，由 DynamicPromptBuilder 输出到消息前缀
         return promptService.buildEnrichedMessage(
                 userMessage,
                 dynamicContext.getSessionId(),
                 dynamicContext.getUserId(),
                 dynamicContext.getTerminalSessionId(),
                 dynamicContext.getRecentCommands(),
-                dynamicContext.getMessageHistory()
+                dynamicContext.getMessageHistory(),
+                dynamicContext.getCurrentIntent()
         );
     }
 

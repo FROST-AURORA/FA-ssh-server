@@ -24,16 +24,28 @@ public class MilestoneTracker {
     /**
      * 检测并记录里程碑事件。
      * <p>
-     * 按角色分别识别关键事件：
-     * <ul>
-     *   <li>user —— 匹配"不对/换个思路"等记为 TASK_CHANGE，"完成/搞定"记为 TASK_COMPLETE，"不要/停/别"记为 USER_CORRECTION</li>
-     *   <li>tool —— 匹配 error/failed/exception 等关键词记为 ERROR</li>
-     * </ul>
-     * 同一个词在不同角色含义不同（用户说"错了"是纠偏，工具输出"error"是执行失败），因此必须按角色分开识别。
-     *
-     * @param sessionId 会话 ID，按会话隔离里程碑
-     * @param role      消息角色："user" 或 "tool"
-     * @param content   消息内容，为 null 或空时直接返回
+     * 按角色分别识别关键事件，记录到会话级缓存。
+     * <p>
+     * 案例 1：用户纠偏
+     * <pre>
+     *   detectAndRecord("session-001", "user", "不对，应该是看 /var/log/nginx/error.log")
+     *   -> 匹配 "不对|不是这样|改一下|换个思路"
+     *   -> 记录 TASK_CHANGE: "不对，应该是看 /var/log/nginx/error.log"
+     * </pre>
+     * <p>
+     * 案例 2：工具报错
+     * <pre>
+     *   detectAndRecord("session-001", "tool", "Error: permission denied")
+     *   -> 匹配 "error|failed|exception"
+     *   -> 记录 ERROR: "Error: permission denied"
+     * </pre>
+     * <p>
+     * 案例 3：任务完成
+     * <pre>
+     *   detectAndRecord("session-001", "user", "搞定，帮大忙了！")
+     *   -> 匹配 "完成了|搞定|结束"
+     *   -> 记录 TASK_COMPLETE: "搞定，帮大忙了！"
+     * </pre>
      */
     public void detectAndRecord(String sessionId, String role, String content) {
         if (sessionId == null || content == null || content.isEmpty()) return;

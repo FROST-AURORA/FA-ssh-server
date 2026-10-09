@@ -14,6 +14,9 @@ import org.springframework.stereotype.Component;
  *   <li>{@link #build} —— 追加到 system instruction 末尾</li>
  *   <li>{@link #buildMessagePrefix} —— 构建为用户消息前缀（当前使用）</li>
  * </ul>
+ *
+ * @author xiaofuge bugstack.cn @小傅哥
+ * 2026/7/30 23:16
  */
 @Slf4j
 @Component
@@ -53,9 +56,28 @@ public class DynamicPromptBuilder {
      * 在 Agent 装配阶段就固定了，运行期改不了，因此把动态上下文拼在用户消息前面。
      * <p>
      * 三类上下文"有才拼、没有不拼"：第一轮对话无历史时返回空串，不塞空标题浪费 token。
+     * <p>
+     * 案例 1：有环境信息和里程碑
+     * <pre>
+     *   ctx = PromptContextVO {
+     *     serverInfo="192.168.1.100",
+     *     osInfo="Linux 5.15.0",
+     *     currentUser="root",
+     *     currentDirectory="/var/log/nginx",
+     *     milestoneVOS=[{type=ERROR, content="permission denied"}],
+     *     intentLabel="DIAGNOSE"
+     *   }
      *
-     * @param ctx 动态上下文，为 null 时返回空串
-     *化消息前缀文本，无内容时返回空串
+     *   返回：
+     *   "[系统环境]\n服务器: 192.168.1.100\n系统: Linux 5.15.0\n用户: root\n目录: /var/log/nginx\n\n[关键事件]\n- [ERROR] permission denied\n\n[用户意图]\nDIAGNOSE\n"
+     * </pre>
+     * <p>
+     * 案例 2：无动态信息（返回空串）
+     * <pre>
+     *   ctx = PromptContextVO {}  // 所有字段为空
+     *
+     *   返回：""  // 不返回空标题，避免浪费 token
+     * </pre>
      */
     public String buildMessagePrefix(PromptContextVO ctx) {
         if (ctx == null) return "";
@@ -66,9 +88,9 @@ public class DynamicPromptBuilder {
         if (!isEmpty(ctx.getServerInfo()) || !isEmpty(ctx.getOsInfo())
                 || !isEmpty(ctx.getCurrentUser()) || !isEmpty(ctx.getCurrentDirectory())) {
             sb.append("[系统环境]\n");
-            if (!isEmpty(ctx.getServerInfo()))       sb.append("服务器: ").append(ctx.getServerInfo()).append("\n");
-            if (!isEmpty(ctx.getOsInfo()))           sb.append("系统: ").append(ctx.getOsInfo()).append("\n");
-            if (!isEmpty(ctx.getCurrentUser()))      sb.append("用户: ").append(ctx.getCurrentUser()).append("\n");
+            if (!isEmpty(ctx.getServerInfo())) sb.append("服务器: ").append(ctx.getServerInfo()).append("\n");
+            if (!isEmpty(ctx.getOsInfo())) sb.append("系统: ").append(ctx.getOsInfo()).append("\n");
+            if (!isEmpty(ctx.getCurrentUser())) sb.append("用户: ").append(ctx.getCurrentUser()).append("\n");
             if (!isEmpty(ctx.getCurrentDirectory())) sb.append("目录: ").append(ctx.getCurrentDirectory()).append("\n");
             hasContent = true;
         }
@@ -91,6 +113,13 @@ public class DynamicPromptBuilder {
 
         if (!hasContent) return "";
 
+        // 意图标签（由意图识别系统经 PromptContextVO.intentLabel 注入，让 AI 感知用户当前意图）
+        // 输出形如 "[用户意图]\nDIAGNOSE\n"，仅做提示不做强制路由。
+        if (!isEmpty(ctx.getIntentLabel())) {
+            log.info("意图识别:{}", ctx.getIntentLabel());
+            sb.append("\n[用户意图]\n").append(ctx.getIntentLabel()).append("\n");
+        }
+
         String prefix = sb.toString();
         log.debug("构建消息前缀，长度: {}", prefix.length());
         return prefix;
@@ -110,10 +139,11 @@ public class DynamicPromptBuilder {
             return;
         }
         sb.append("\n\n## 当前环境信息\n");
-        if (!isEmpty(ctx.getServerInfo()))       sb.append("- 服务器: ").append(ctx.getServerInfo()).append("\n");
-        if (!isEmpty(ctx.getOsInfo()))           sb.append("- 操作系统: ").append(ctx.getOsInfo()).append("\n");
-        if (!isEmpty(ctx.getCurrentUser()))      sb.append("- 当前用户: ").append(ctx.getCurrentUser()).append("\n");
-        if (!isEmpty(ctx.getCurrentDirectory())) sb.append("- 工作目录: ").append(ctx.getCurrentDirectory()).append("\n");
+        if (!isEmpty(ctx.getServerInfo())) sb.append("- 服务器: ").append(ctx.getServerInfo()).append("\n");
+        if (!isEmpty(ctx.getOsInfo())) sb.append("- 操作系统: ").append(ctx.getOsInfo()).append("\n");
+        if (!isEmpty(ctx.getCurrentUser())) sb.append("- 当前用户: ").append(ctx.getCurrentUser()).append("\n");
+        if (!isEmpty(ctx.getCurrentDirectory()))
+            sb.append("- 工作目录: ").append(ctx.getCurrentDirectory()).append("\n");
     }
 
     /**
@@ -135,7 +165,20 @@ public class DynamicPromptBuilder {
     /**
      * 将里程碑事件列表以 Markdown 列表格式追加到 StringBuilder 中。
      * <p>
-     * 每条里程碑格式为 {@code [TYPE] content  目标 StringBuilder
+     * 每条里程碑格式为：{@code [TYPE] content}
+     * <p>
+     * 案例：
+     * <pre>
+     *   ctx.getMilestoneVOS() = [
+     *     { type=ERROR, content="permission denied" },
+     *     { type=TASK_CHANGE, content="换个思路看 access.log" }
+     *   ]
+     *
+     *   追加结果：
+     *   "\n## 关键事件\n- [ERROR] permission denied\n- [TASK_CHANGE] 换个思路看 access.log\n"
+     * </pre>
+     *
+     * @param sb  目标 StringBuilder
      * @param ctx 动态上下文
      */
     private void appendMilestones(StringBuilder sb, PromptContextVO ctx) {
